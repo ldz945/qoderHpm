@@ -1,0 +1,128 @@
+"""
+计划管理 - Views
+包含：PlanTaskViewSet, ResourcePlanViewSet, ResourceReserveViewSet, PlanVersionViewSet
+"""
+
+from rest_framework import viewsets, filters, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+from django.db import transaction
+from .models import PlanTask, ResourcePlan, ResourceReserve, PlanVersion
+from .serializers import (
+    PlanTaskSerializer, 
+    PlanTaskTreeSerializer,
+    ResourcePlanSerializer, 
+    ResourceReserveSerializer, 
+    PlanVersionSerializer
+)
+
+
+class PlanTaskViewSet(viewsets.ModelViewSet):
+    """计划任务视图集"""
+    queryset = PlanTask.objects.all()
+    filterset_fields = [
+        'project', 'phase', 'task_status', 'task_level', 
+        'is_hour_task', 'parent_task', 'version'
+    ]
+    search_fields = ['task_name', 'department', 'task_owner']
+    ordering_fields = ['task_level', 'planned_start_date', 'created_at', 'sort_order']
+    ordering = ['sort_order', 'plan_task_id']
+    
+    def get_serializer_class(self):
+        if self.request.query_params.get('tree', 'false').lower() == 'true':
+            return PlanTaskTreeSerializer
+        return PlanTaskSerializer
+
+    @action(detail=False, methods=['post'], url_path='batch-update')
+    def batch_update(self, request):
+        """
+        批量更新任务（用于甘特图拖拽/拉伸/排序操作）
+        请求体：{ "tasks": [ { "plan_task_id": 1, "planned_start_date": "2024-01-01", ... }, ... ] }
+        """
+        tasks_data = request.data.get('tasks', [])
+        if not tasks_data:
+            return Response({'detail': '任务列表为空'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_ids = []
+        errors = []
+        with transaction.atomic():
+            for task_data in tasks_data:
+                task_id = task_data.get('plan_task_id')
+                if not task_id:
+                    errors.append({'error': '缺少 plan_task_id', 'data': task_data})
+                    continue
+                try:
+                    task = PlanTask.objects.get(pk=task_id)
+                    # 只更新允许的字段
+                    allowed_fields = [
+                        'planned_start_date', 'planned_end_date', 'workload_days',
+                        'sort_order', 'parent_task_id', 'phase', 'progress_percent',
+                        'task_name', 'pre_task_code', 'logic_relation', 'task_level'
+                    ]
+                    for field in allowed_fields:
+                        if field in task_data:
+                            setattr(task, field, task_data[field])
+                    task.save()
+                    updated_ids.append(task_id)
+                except PlanTask.DoesNotExist:
+                    errors.append({'error': f'任务 {task_id} 不存在', 'plan_task_id': task_id})
+
+        return Response({
+            'updated': updated_ids,
+            'errors': errors,
+            'message': f'成功更新 {len(updated_ids)} 条任务'
+        })
+
+
+class ResourcePlanViewSet(viewsets.ModelViewSet):
+    """资源计划视图集"""
+    queryset = ResourcePlan.objects.all()
+    serializer_class = ResourcePlanSerializer
+    filterset_fields = [
+        'project', 'task', 'resource_type', 'resource_code', 'status'
+    ]
+    search_fields = ['resource_name', 'resource_code']
+    ordering_fields = ['planned_start_date', 'resource_code', 'created_at']
+    ordering = ['resource_code']
+
+
+class ResourceReserveViewSet(viewsets.ModelViewSet):
+    """资源预占视图集"""
+    queryset = ResourceReserve.objects.all()
+    serializer_class = ResourceReserveSerializer
+    filterset_fields = [
+        'project', 'resource_type', 'resource_code', 
+        'reserve_status', 'project_short_code'
+    ]
+    search_fields = ['resource_name', 'resource_code', 'project_short_code']
+    ordering_fields = ['reserve_start_time', 'resource_code', 'created_at']
+    ordering = ['-reserve_start_time']
+
+
+class PlanVersionViewSet(viewsets.ModelViewSet):
+    """计划版本视图集"""
+    queryset = PlanVersion.objects.select_related('project').all()
+    serializer_class = PlanVersionSerializer
+    filterset_fields = ['project', 'status', 'is_current']
+    search_fields = ['version_no', 'version_name']
+    ordering_fields = ['version_no', 'publish_date', 'created_at']
+    ordering = ['-is_current', '-version_no']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        params = self.request.query_params
+
+        project_code = params.get('project_code')
+        project_manager = params.get('project_manager')
+        status = params.get('status')
+
+        if project_code:
+            queryset = queryset.filter(project__project_code__icontains=project_code)
+        if project_manager:
+            queryset = queryset.filter(project__pm__icontains=project_manager)
+        if status:
+            queryset = queryset.filter(status=status.upper())
+
+        return queryset
+
