@@ -447,26 +447,27 @@ const initGantt = () => {
     return true
   })
 
-  // 拖拽完成后：执行级联调整
-  gantt.attachEvent('onAfterTaskDrag', function (id, mode, e) {
-    const task = gantt.getTask(id)
-    recordChange(task)
+   // 拖拽完成后：执行级联调整
+   gantt.attachEvent('onAfterTaskDrag', function (id, mode, e) {
+     const task = gantt.getTask(id)
+     recordChange(task)
 
-    // 父任务移动时，子任务跟随移动
-    if (mode === gantt.config.drag_mode.move) {
-      cascadeChildren(task, dragStartDate)
-    }
+     // 父任务移动时，子任务跟随移动
+     if (mode === gantt.config.drag_mode.move) {
+       cascadeChildren(task, dragStartDate)
+     }
 
-    // 基于依赖链级联更新后继任务（move 和 resize 都触发）
-    cascadeByLinks(id)
+     // 基于依赖链级联更新后继任务（move 和 resize 都触发）
+     cascadeByLinks(id)
 
-    // 也回溯更新前驱任务的父任务日期范围
-    updateParentDates(task)
+     // 也回溯更新前驱任务的父任务日期范围
+     // updateParentDates 内部现在也会调用 cascadeByLinks，以级联调整与父任务有FS关系的后续任务
+     updateParentDates(task)
 
-    // 强制全量刷新，确保视觉同步
-    gantt.render()
-    return true
-  })
+     // 强制全量刷新，确保视觉同步
+     gantt.render()
+     return true
+   })
 
   /**
    * 级联更新子任务：当父任务整体移动时，所有子任务跟随移动相同偏移量
@@ -619,44 +620,49 @@ const initGantt = () => {
     })
   }
 
-  /**
-   * 更新父任务日期范围：使父任务包含所有子任务
-   */
-  function updateParentDates(task) {
-    const parentId = task.parent
-    if (!parentId || parentId == 0) return
+   /**
+    * 更新父任务日期范围：使父任务包含所有子任务
+    * 并级联调整与父任务有FS关系的后续任务
+    */
+   function updateParentDates(task) {
+     const parentId = task.parent
+     if (!parentId || parentId == 0) return
 
-    try {
-      const parent = gantt.getTask(parentId)
-      const children = gantt.getChildren(parentId)
-      if (children.length === 0) return
+     try {
+       const parent = gantt.getTask(parentId)
+       const children = gantt.getChildren(parentId)
+       if (children.length === 0) return
 
-      let minStart = null
-      let maxEnd = null
-      children.forEach(childId => {
-        const child = gantt.getTask(childId)
-        if (!minStart || child.start_date < minStart) minStart = new Date(child.start_date)
-        const childEnd = child.end_date || gantt.calculateEndDate(child.start_date, child.duration)
-        if (!maxEnd || childEnd > maxEnd) maxEnd = new Date(childEnd)
-      })
+       let minStart = null
+       let maxEnd = null
+       children.forEach(childId => {
+         const child = gantt.getTask(childId)
+         if (!minStart || child.start_date < minStart) minStart = new Date(child.start_date)
+         const childEnd = child.end_date || gantt.calculateEndDate(child.start_date, child.duration)
+         if (!maxEnd || childEnd > maxEnd) maxEnd = new Date(childEnd)
+       })
 
-      if (minStart && maxEnd) {
-        const changed = parent.start_date.getTime() !== minStart.getTime() ||
-                        parent.end_date.getTime() !== maxEnd.getTime()
-        if (changed) {
-          parent.start_date = minStart
-          parent.end_date = maxEnd
-          parent.duration = gantt.calculateDuration(minStart, maxEnd)
-          gantt.updateTask(parentId)
-          recordChange(parent)
-          // 递归向上
-          updateParentDates(parent)
-        }
-      }
-    } catch (e) {
-      // parent doesn't exist
-    }
-  }
+       if (minStart && maxEnd) {
+         const changed = parent.start_date.getTime() !== minStart.getTime() ||
+                         parent.end_date.getTime() !== maxEnd.getTime()
+         if (changed) {
+           parent.start_date = minStart
+           parent.end_date = maxEnd
+           parent.duration = gantt.calculateDuration(minStart, maxEnd)
+           gantt.updateTask(parentId)
+           recordChange(parent)
+
+           // 新增：父任务日期变化后，级联调整与它有FS关系的后续任务
+           cascadeByLinks(parentId)
+
+           // 递归向上
+           updateParentDates(parent)
+         }
+       }
+     } catch (e) {
+       // parent doesn't exist
+     }
+   }
 
   // 拖拽排序后
   gantt.attachEvent('onRowDragEnd', function (id, target) {
