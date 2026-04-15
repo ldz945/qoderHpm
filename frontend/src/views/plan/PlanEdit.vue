@@ -229,6 +229,7 @@
             :flat-tasks="flatTasks"
             :project-id="projectId"
             :active="activeTab === 'gantt'"
+            :on-save="handleGanttSave"
             @save="handleGanttSave"
           />
         </div>
@@ -340,6 +341,7 @@ import {
   getPlanTasks,
   createPlanTask,
   updatePlanTask,
+  partialUpdatePlanTask,
   deletePlanTask,
   getResourcePlans,
   createResourcePlan,
@@ -600,10 +602,30 @@ const handleEditTask = (task) => {
 // 保存任务
 const handleSaveTask = async (task) => {
   try {
+    const payload = {
+      task_name: task.name,
+      task_owner: task.owner,
+      authorized_owner: task.delegate,
+      planned_start_date: task.planStart,
+      planned_end_date: task.planEnd,
+      workload_days: task.workload,
+      phase: task.phase,
+      logic_relation: task.logicRelation,
+      pre_task_code: task.preTask,
+      department: task.department,
+      progress_percent: task.progress,
+      is_hour_task: task.isWorkHourTask ? 'Y' : 'N',
+      has_deliverable: task.hasDeliverable ? 'Y' : 'N',
+    }
+
     if (task.id && String(task.id).length < 13) {
-      await updatePlanTask(task.id, task)
+      await updatePlanTask(task.id, payload)
     } else {
-      await createPlanTask(task)
+      payload.project = projectId
+      if (task.parentId) {
+        payload.parent_task_id = task.parentId
+      }
+      await createPlanTask(payload)
     }
     task.editing = false
     message.success('保存成功')
@@ -671,7 +693,22 @@ const handleDeleteResource = async (record) => {
 
 // 保存计划
 const handleSave = async () => {
-  message.success('计划保存成功')
+  // 甘特图页的修改由子组件维护，统一通过其暴露的 saveChanges 落库
+  if (activeTab.value === 'gantt') {
+    if (!ganttRef.value || typeof ganttRef.value.saveChanges !== 'function') {
+      message.warning('甘特图尚未初始化，请稍后重试')
+      return
+    }
+    try {
+      await ganttRef.value.saveChanges()
+      await fetchTasks()
+    } catch (error) {
+      message.error('保存失败，请稍后重试')
+    }
+    return
+  }
+
+  message.info('请在任务计划中使用行内“保存”，或切到甘特图后点击“保存修改”')
 }
 
 // 提交审批
@@ -692,9 +729,49 @@ const handleTbqImport = () => {
 // 甘特图保存
 const handleGanttSave = async (tasks) => {
   try {
-    await batchUpdatePlanTasks({ tasks })
+    const normalizedTasks = (tasks || []).map(task => ({
+      ...task,
+      plan_task_id: task.plan_task_id || task.id
+    }))
+
+    const batchRes = await batchUpdatePlanTasks({ tasks: normalizedTasks })
+    const batchData = batchRes?.data && typeof batchRes.data === 'object' ? batchRes.data : batchRes
+    const updated = Array.isArray(batchData?.updated) ? batchData.updated : []
+    const errors = Array.isArray(batchData?.errors) ? batchData.errors : []
+
+    // 批量接口出现“0更新”或部分失败时，回退到逐条 PATCH，保证尽量落库
+    if (normalizedTasks.length > 0 && (updated.length === 0 || errors.length > 0)) {
+      const fields = [
+        'planned_start_date', 'planned_end_date', 'workload_days',
+        'sort_order', 'parent_task_id', 'phase', 'progress_percent',
+        'task_name', 'pre_task_code', 'logic_relation', 'task_level'
+      ]
+      const failedIdSet = new Set((errors || []).map(item => Number(item?.plan_task_id)).filter(Boolean))
+      const fallbackTargets = failedIdSet.size > 0
+        ? normalizedTasks.filter(task => failedIdSet.has(Number(task.plan_task_id)))
+        : normalizedTasks
+
+      const patchJobs = fallbackTargets.map(task => {
+        const payload = {}
+        fields.forEach(key => {
+          if (Object.prototype.hasOwnProperty.call(task, key)) payload[key] = task[key]
+        })
+        // 确保 parent_task_id 始终包含（可能为 null 表示根任务）
+        if (!Object.prototype.hasOwnProperty.call(payload, 'parent_task_id')) {
+          payload.parent_task_id = task.parent_task_id ?? task.parent_task ?? null
+        }
+        return partialUpdatePlanTask(task.plan_task_id, payload)
+      })
+
+      const patchResults = await Promise.allSettled(patchJobs)
+      const failed = patchResults.filter(item => item.status === 'rejected')
+      if (failed.length > 0) {
+        throw new Error(`仍有 ${failed.length} 条任务保存失败`)
+      }
+    }
+
+    await fetchTasks() // 重新加载数据
     message.success('甘特图修改已同步到数据库')
-    fetchTasks() // 重新加载数据
   } catch (error) {
     message.error('同步失败，请重试')
     throw error // 让 GanttChart 知道保存失败

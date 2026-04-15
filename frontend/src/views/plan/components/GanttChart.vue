@@ -98,6 +98,10 @@ const props = defineProps({
   active: {
     type: Boolean,
     default: false
+  },
+  onSave: {
+    type: Function,
+    default: null
   }
 })
 
@@ -482,9 +486,18 @@ const initGantt = () => {
     children.forEach(childId => {
       const child = gantt.getTask(childId)
       const childOldStart = new Date(child.start_date)
+      const childPreTaskCode = child.pre_task_code
+      const childLogicRelation = child.logic_relation
       child.start_date = new Date(child.start_date.getTime() + delta)
       child.end_date = new Date(child.end_date.getTime() + delta)
       gantt.updateTask(childId)  // 通知 gantt 更新该任务的内部状态
+      // 恢复可能被 updateTask 清除的自定义属性
+      if (!child.pre_task_code && childPreTaskCode) {
+        child.pre_task_code = childPreTaskCode
+      }
+      if (!child.logic_relation && childLogicRelation) {
+        child.logic_relation = childLogicRelation
+      }
       recordChange(child)
 
       // 递归子节点
@@ -603,10 +616,19 @@ const initGantt = () => {
         return
       }
 
-      // 更新后继任务时间
+      // 更新后继任务时间（保留自定义属性，防止 updateTask 丢失）
+      const savedPreTaskCode = targetTask.pre_task_code
+      const savedLogicRelation = targetTask.logic_relation
       targetTask.start_date = newStart
       targetTask.end_date = newEnd
       gantt.updateTask(link.target)  // 关键：通知 gantt 刷新该任务
+      // 恢复可能被 updateTask 清除的自定义属性
+      if (!targetTask.pre_task_code && savedPreTaskCode) {
+        targetTask.pre_task_code = savedPreTaskCode
+      }
+      if (!targetTask.logic_relation && savedLogicRelation) {
+        targetTask.logic_relation = savedLogicRelation
+      }
       recordChange(targetTask)
 
       // 后继的子任务也需要跟随移动
@@ -828,18 +850,46 @@ const recordChange = (task) => {
     ? formatDate(task.end_date)
     : task.end_date
 
+  // 根据日期重新计算 workload_days（天数差 = end - start，不加1）
+  let workloadDays = task.duration || 0
+  if (startDate && endDate) {
+    const s = new Date(startDate)
+    const e = new Date(endDate)
+    const diffTime = e.getTime() - s.getTime()
+    workloadDays = Math.max(1, Math.round(diffTime / (1000 * 60 * 60 * 24)))
+  }
+  if (workloadDays <= 0) workloadDays = 1
+
+  const rawParent = task.parent
+  const normalizedParent = (rawParent === 0 || rawParent === '0' || rawParent === '' || rawParent == null)
+    ? null
+    : rawParent
+
+  // 从 gantt 内部 link 数据回查 pre_task_code，防止自定义属性在 updateTask 后丢失
+  let preTaskCode = task.pre_task_code || ''
+  let logicRelation = task.logic_relation || 'FS'
+  if (!preTaskCode && task.$target && Array.isArray(task.$target) && task.$target.length > 0) {
+    try {
+      const incomingLink = gantt.getLink(task.$target[0])
+      if (incomingLink && incomingLink.source) {
+        preTaskCode = String(incomingLink.source)
+        logicRelation = reverseLinkTypeMap[String(incomingLink.type)] || 'FS'
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   changedTasks.value.set(task.id, {
     plan_task_id: task.id,
     planned_start_date: startDate,
     planned_end_date: endDate,
-    workload_days: task.duration || 0,
+    workload_days: workloadDays,
     sort_order: task.sort_order || 0,
-    parent_task_id: task.parent || null,
+    parent_task_id: normalizedParent,
     phase: task.phase || '',
     progress_percent: Math.round((task.progress || 0) * 100),
     task_name: task.text,
-    pre_task_code: task.pre_task_code || '',
-    logic_relation: task.logic_relation || 'FS',
+    pre_task_code: preTaskCode,
+    logic_relation: logicRelation,
     task_level: task.task_level || 1
   })
   pendingChanges.value = changedTasks.value.size
@@ -899,13 +949,15 @@ const convertFlatTasks = (tasks) => {
     const startDate = task.planned_start_date
     const endDate = task.planned_end_date
 
-    let duration = Number(task.workload_days) || 1
-    if (startDate && endDate) {
+    // 优先使用后端的 workload_days（天数差 = end - start，不加1）
+    let duration = Number(task.workload_days) || 0
+    if (duration <= 0 && startDate && endDate) {
       const start = new Date(startDate)
       const end = new Date(endDate)
       const diffTime = end.getTime() - start.getTime()
-      duration = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1)
+      duration = Math.max(1, Math.round(diffTime / (1000 * 60 * 60 * 24)))
     }
+    if (duration <= 0) duration = 1
 
     const phase = task.phase || ''
     const phaseInfo = getPhaseColor(phase)
@@ -953,13 +1005,15 @@ const flattenTreeTasks = (tasks, parentId = 0, sortStart = 0) => {
     const startDate = task.planned_start_date || task.planStart
     const endDate = task.planned_end_date || task.planEnd
 
-    let duration = task.workload_days || task.workload || 1
-    if (startDate && endDate) {
+    // 优先使用后端的 workload_days（天数差 = end - start，不加1）
+    let duration = Number(task.workload_days || task.workload) || 0
+    if (duration <= 0 && startDate && endDate) {
       const start = new Date(startDate)
       const end = new Date(endDate)
       const diffTime = end.getTime() - start.getTime()
-      duration = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1)
+      duration = Math.max(1, Math.round(diffTime / (1000 * 60 * 60 * 24)))
     }
+    if (duration <= 0) duration = 1
 
     const phase = task.phase || ''
     const phaseInfo = getPhaseColor(phase)
@@ -1043,7 +1097,12 @@ const handleSaveChanges = async () => {
   saving.value = true
   try {
     const tasks = Array.from(changedTasks.value.values())
-    await emit('save', tasks)
+    if (typeof props.onSave === 'function') {
+      await props.onSave(tasks)
+    } else {
+      // 向后兼容旧事件方式（不保证可等待父组件异步结果）
+      emit('save', tasks)
+    }
     changedTasks.value.clear()
     pendingChanges.value = 0
     message.success(`成功保存 ${tasks.length} 项任务修改`)

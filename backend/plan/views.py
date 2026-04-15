@@ -7,7 +7,7 @@ from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db import transaction
+from django.db.utils import IntegrityError
 from .models import PlanTask, ResourcePlan, ResourceReserve, PlanVersion
 from .serializers import (
     PlanTaskSerializer, 
@@ -46,27 +46,34 @@ class PlanTaskViewSet(viewsets.ModelViewSet):
 
         updated_ids = []
         errors = []
-        with transaction.atomic():
-            for task_data in tasks_data:
-                task_id = task_data.get('plan_task_id')
-                if not task_id:
-                    errors.append({'error': '缺少 plan_task_id', 'data': task_data})
-                    continue
-                try:
-                    task = PlanTask.objects.get(pk=task_id)
-                    # 只更新允许的字段
-                    allowed_fields = [
-                        'planned_start_date', 'planned_end_date', 'workload_days',
-                        'sort_order', 'parent_task_id', 'phase', 'progress_percent',
-                        'task_name', 'pre_task_code', 'logic_relation', 'task_level'
-                    ]
-                    for field in allowed_fields:
-                        if field in task_data:
-                            setattr(task, field, task_data[field])
-                    task.save()
-                    updated_ids.append(task_id)
-                except PlanTask.DoesNotExist:
-                    errors.append({'error': f'任务 {task_id} 不存在', 'plan_task_id': task_id})
+        for task_data in tasks_data:
+            task_id = task_data.get('plan_task_id')
+            if not task_id:
+                errors.append({'error': '缺少 plan_task_id', 'data': task_data})
+                continue
+            try:
+                task = PlanTask.objects.get(pk=task_id)
+                # 只更新允许的字段
+                allowed_fields = [
+                    'planned_start_date', 'planned_end_date', 'workload_days',
+                    'sort_order', 'parent_task_id', 'phase', 'progress_percent',
+                    'task_name', 'pre_task_code', 'logic_relation', 'task_level'
+                ]
+                for field in allowed_fields:
+                    if field not in task_data:
+                        continue
+                    value = task_data[field]
+                    if field == 'parent_task_id':
+                        # 甘特图根任务通常传 0，这里统一转为 NULL
+                        if value in (0, '0', '', None):
+                            value = None
+                    setattr(task, field, value)
+                task.save()
+                updated_ids.append(task_id)
+            except PlanTask.DoesNotExist:
+                errors.append({'error': f'任务 {task_id} 不存在', 'plan_task_id': task_id})
+            except (IntegrityError, ValueError, TypeError) as exc:
+                errors.append({'error': str(exc), 'plan_task_id': task_id})
 
         return Response({
             'updated': updated_ids,

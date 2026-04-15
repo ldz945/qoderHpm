@@ -8,6 +8,7 @@ export const getPlanTasks = (params) => request.get('/plans/plan-tasks/', { para
 export const getPlanTask = (id) => request.get(`/plans/plan-tasks/${id}/`)
 export const createPlanTask = (data) => request.post('/plans/plan-tasks/', data)
 export const updatePlanTask = (id, data) => request.put(`/plans/plan-tasks/${id}/`, data)
+export const partialUpdatePlanTask = (id, data) => request.patch(`/plans/plan-tasks/${id}/`, data)
 export const deletePlanTask = (id) => request.delete(`/plans/plan-tasks/${id}/`)
 
 // ===== 资源计划 =====

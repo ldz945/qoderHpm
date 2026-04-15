@@ -9,7 +9,14 @@ from .models import PlanTask, ResourcePlan, ResourceReserve, PlanVersion
 
 class PlanTaskSerializer(serializers.ModelSerializer):
     """计划任务序列化器"""
-    
+    parent_task_id = serializers.PrimaryKeyRelatedField(
+        source='parent_task',
+        queryset=PlanTask.objects.all(),
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+
     class Meta:
         model = PlanTask
         fields = '__all__'
