@@ -744,7 +744,7 @@ const handleGanttSave = async (tasks) => {
       const fields = [
         'planned_start_date', 'planned_end_date', 'workload_days',
         'sort_order', 'parent_task_id', 'phase', 'progress_percent',
-        'task_name', 'pre_task_code', 'logic_relation', 'task_level'
+        'task_name', 'pre_task_code', 'logic_relation', 'dependencies', 'task_level'
       ]
       const failedIdSet = new Set((errors || []).map(item => Number(item?.plan_task_id)).filter(Boolean))
       const fallbackTargets = failedIdSet.size > 0

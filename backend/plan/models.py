@@ -131,6 +131,51 @@ class PlanTask(models.Model):
         return f'{self.task_name} ({self.get_task_status_display()})'
 
 
+class PlanTaskDependency(models.Model):
+    """任务依赖关系（支持一个任务多个前置）"""
+
+    LOGIC_RELATION_CHOICES = PlanTask.LOGIC_RELATION_CHOICES
+
+    dependency_id = models.AutoField(primary_key=True, verbose_name='依赖ID')
+    successor_task = models.ForeignKey(
+        PlanTask,
+        on_delete=models.CASCADE,
+        related_name='successor_dependencies',
+        verbose_name='后续任务'
+    )
+    predecessor_task = models.ForeignKey(
+        PlanTask,
+        on_delete=models.CASCADE,
+        related_name='predecessor_dependencies',
+        verbose_name='前置任务'
+    )
+    logic_relation = models.CharField(
+        max_length=10,
+        default='FS',
+        choices=LOGIC_RELATION_CHOICES,
+        verbose_name='逻辑关系'
+    )
+    lag_days = models.DecimalField(max_digits=8, decimal_places=2, default=0, verbose_name='时差(天)')
+    sort_order = models.IntegerField(default=0, verbose_name='排序序号')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'hpm_plan_task_dependency'
+        verbose_name = '任务依赖关系'
+        verbose_name_plural = '任务依赖关系'
+        ordering = ['successor_task_id', 'sort_order', 'dependency_id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['successor_task', 'predecessor_task'],
+                name='uniq_task_dependency_pair'
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.predecessor_task_id}->{self.successor_task_id} ({self.logic_relation})'
+
+
 class ResourcePlan(models.Model):
     """资源计划"""
 

@@ -12,7 +12,8 @@ from .models import PlanTask, ResourcePlan, ResourceReserve, PlanVersion
 from .serializers import (
     PlanTaskSerializer, 
     PlanTaskTreeSerializer,
-    ResourcePlanSerializer, 
+    sync_task_dependencies,
+    ResourcePlanSerializer,
     ResourceReserveSerializer, 
     PlanVersionSerializer
 )
@@ -20,7 +21,7 @@ from .serializers import (
 
 class PlanTaskViewSet(viewsets.ModelViewSet):
     """计划任务视图集"""
-    queryset = PlanTask.objects.all()
+    queryset = PlanTask.objects.prefetch_related('successor_dependencies').all()
     filterset_fields = [
         'project', 'phase', 'task_status', 'task_level', 
         'is_hour_task', 'parent_task', 'version'
@@ -69,6 +70,23 @@ class PlanTaskViewSet(viewsets.ModelViewSet):
                             value = None
                     setattr(task, field, value)
                 task.save()
+
+                # 新协议：每个任务可提交多条前置依赖
+                if 'dependencies' in task_data:
+                    sync_task_dependencies(task, task_data.get('dependencies'))
+                # 旧协议兼容：仅单条 pre_task_code/logic_relation
+                elif 'pre_task_code' in task_data:
+                    raw_pre = task_data.get('pre_task_code')
+                    if raw_pre in (None, '', 0, '0'):
+                        sync_task_dependencies(task, [])
+                    else:
+                        sync_task_dependencies(task, [{
+                            'predecessor_task_id': raw_pre,
+                            'logic_relation': task_data.get('logic_relation') or task.logic_relation,
+                            'lag_days': 0,
+                            'sort_order': 0,
+                        }])
+
                 updated_ids.append(task_id)
             except PlanTask.DoesNotExist:
                 errors.append({'error': f'任务 {task_id} 不存在', 'plan_task_id': task_id})

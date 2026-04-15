@@ -141,8 +141,13 @@ const handleLinkModalOk = () => {
     // 按新的依赖类型级联调整（延迟确保 link 数据已同步）
     const sourceId = link.source
     setTimeout(() => {
-      cascadeByLinks(sourceId)
-      gantt.render()
+      cascadeInProgress = true
+      try {
+        cascadeByLinks(sourceId)
+        gantt.render()
+      } finally {
+        cascadeInProgress = false
+      }
     }, 0)
 
     message.success('依赖关系已更新')
@@ -159,14 +164,7 @@ const handleLinkModalCancel = () => {
 const handleDeleteLink = () => {
   if (linkModalData.linkId == null) return
   try {
-    const link = gantt.getLink(linkModalData.linkId)
-    // 清除目标任务的前置信息
-    try {
-      const targetTask = gantt.getTask(link.target)
-      targetTask.pre_task_code = ''
-      targetTask.logic_relation = 'FS'
-      recordChange(targetTask)
-    } catch (e) { /* target may not exist */ }
+    // 仅执行删除，依赖快照由 onAfterLinkDelete 统一记录
     gantt.deleteLink(linkModalData.linkId)
     message.success('依赖关系已删除')
   } catch (e) {
@@ -203,6 +201,59 @@ const getPhaseColor = (phase) => phaseColorMap[phase] || defaultPhaseColor
 // 依赖类型映射：后端 FS/SF/FF/SS <-> dhtmlx link type 0/1/2/3
 const linkTypeMap = { 'FS': '0', 'SF': '1', 'FF': '2', 'SS': '3' }
 const reverseLinkTypeMap = { '0': 'FS', '1': 'SF', '2': 'FF', '3': 'SS' }
+
+const normalizeTaskId = (value) => {
+  if (value === null || value === undefined) return ''
+  return String(value).trim()
+}
+
+/**
+ * 获取任务的所有入向连线（当前任务为 target）
+ */
+const getIncomingLinks = (taskId) => {
+  let task
+  try {
+    task = gantt.getTask(taskId)
+  } catch (e) {
+    return []
+  }
+
+  if (task.$target && Array.isArray(task.$target) && task.$target.length > 0) {
+    return task.$target.map(linkId => {
+      try { return gantt.getLink(linkId) } catch (e) { return null }
+    }).filter(Boolean)
+  }
+
+  const result = []
+  try {
+    const allLinkIds = gantt.getLinks()
+    if (Array.isArray(allLinkIds)) {
+      allLinkIds.forEach(lid => {
+        try {
+          const l = gantt.getLink(lid)
+          if (l && normalizeTaskId(l.target) === normalizeTaskId(taskId)) result.push(l)
+        } catch (e) { /* skip */ }
+      })
+    }
+  } catch (e) { /* getLinks not available */ }
+
+  return result
+}
+
+const buildDependenciesFromIncomingLinks = (taskId) => {
+  const incomingLinks = getIncomingLinks(taskId)
+  if (!Array.isArray(incomingLinks) || incomingLinks.length === 0) return []
+
+  return incomingLinks
+    .filter(link => link && link.source)
+    .map((link, index) => ({
+      predecessor_task_id: Number(link.source),
+      logic_relation: reverseLinkTypeMap[String(link.type)] || 'FS',
+      lag_days: 0,
+      sort_order: index
+    }))
+    .filter(dep => Number.isFinite(dep.predecessor_task_id) && dep.predecessor_task_id > 0)
+}
 
 // ========================
 // 缩放配置
@@ -440,6 +491,9 @@ const initGantt = () => {
   // 事件监听
   // ========================
 
+  // 级联保护标志：防止 cascadeByLinks 内部调用 gantt.updateTask() 触发 onAfterTaskUpdate 导致无限递归
+  let cascadeInProgress = false
+
   // 拖拽开始前：记录原始日期
   let dragStartDate = null
   let dragEndDate = null
@@ -454,22 +508,27 @@ const initGantt = () => {
    // 拖拽完成后：执行级联调整
    gantt.attachEvent('onAfterTaskDrag', function (id, mode, e) {
      const task = gantt.getTask(id)
+     
      recordChange(task)
 
-     // 父任务移动时，子任务跟随移动
-     if (mode === gantt.config.drag_mode.move) {
-       cascadeChildren(task, dragStartDate)
+     cascadeInProgress = true
+     try {
+       // 父任务移动时，子任务跟随移动
+       if (mode === gantt.config.drag_mode.move) {
+         cascadeChildren(task, dragStartDate)
+       }
+
+       // 基于依赖链级联更新后继任务（move 和 resize 都触发）
+       cascadeByLinks(id)
+
+       // 也回溯更新前驱任务的父任务日期范围
+       updateParentDates(task)
+
+       // 强制全量刷新，确保视觉同步
+       gantt.render()
+     } finally {
+       cascadeInProgress = false
      }
-
-     // 基于依赖链级联更新后继任务（move 和 resize 都触发）
-     cascadeByLinks(id)
-
-     // 也回溯更新前驱任务的父任务日期范围
-     // updateParentDates 内部现在也会调用 cascadeByLinks，以级联调整与父任务有FS关系的后续任务
-     updateParentDates(task)
-
-     // 强制全量刷新，确保视觉同步
-     gantt.render()
      return true
    })
 
@@ -483,27 +542,30 @@ const initGantt = () => {
     if (delta === 0) return
 
     const children = gantt.getChildren(parentTask.id)
+
+    // Phase 1: 先保存所有子任务的原始位置，防止兄弟的 cascadeByLinks 修改后再叠加 delta
+    const originals = new Map()
     children.forEach(childId => {
       const child = gantt.getTask(childId)
-      const childOldStart = new Date(child.start_date)
-      const childPreTaskCode = child.pre_task_code
-      const childLogicRelation = child.logic_relation
-      child.start_date = new Date(child.start_date.getTime() + delta)
-      child.end_date = new Date(child.end_date.getTime() + delta)
-      gantt.updateTask(childId)  // 通知 gantt 更新该任务的内部状态
-      // 恢复可能被 updateTask 清除的自定义属性
-      if (!child.pre_task_code && childPreTaskCode) {
-        child.pre_task_code = childPreTaskCode
-      }
-      if (!child.logic_relation && childLogicRelation) {
-        child.logic_relation = childLogicRelation
-      }
+      originals.set(childId, { start: new Date(child.start_date), end: new Date(child.end_date) })
+    })
+
+    // 基于原始位置统一移动所有子任务
+    children.forEach(childId => {
+      const child = gantt.getTask(childId)
+      const orig = originals.get(childId)
+      child.start_date = new Date(orig.start.getTime() + delta)
+      child.end_date = new Date(orig.end.getTime() + delta)
+      child.duration = gantt.calculateDuration(child.start_date, child.end_date)
       recordChange(child)
 
       // 递归子节点
-      cascadeChildren(child, childOldStart)
+      cascadeChildren(child, orig.start)
+    })
 
-      // 子任务移动后，其后继也需要级联
+    // Phase 2: 所有子任务统一移动完成后，再统一处理依赖约束
+    // 避免兄弟 A 的 cascadeByLinks 修改兄弟 B 后，B 再被 Phase 1 叠加 delta
+    children.forEach(childId => {
       cascadeByLinks(childId)
     })
   }
@@ -555,6 +617,7 @@ const initGantt = () => {
       }
     } catch (e) { /* skip */ }
 
+
     return result
   }
 
@@ -562,84 +625,129 @@ const initGantt = () => {
    * 基于依赖链级联更新后继任务
    * 前驱变了 → 强制后继满足约束
    */
-  function cascadeByLinks(taskId, visited) {
-    if (!visited) visited = new Set()
-    if (visited.has(String(taskId))) return
-    visited.add(String(taskId))
+  function cascadeByLinks(taskId) {
+    
+    const queue = [String(taskId)]
+    const inQueue = new Set(queue)
 
-    let task
-    try {
-      task = gantt.getTask(taskId)
-    } catch (e) {
-      return
+    const maxDate = (base, candidate) => {
+      if (!candidate) return base
+      if (!base || candidate.getTime() > base.getTime()) return new Date(candidate)
+      return base
     }
 
-    // 获取当前任务为 source 的所有出向连线
-    const outLinks = getOutgoingLinks(taskId)
+    const isAncestorTask = (ancestorId, taskId) => {
+      const normalizedAncestorId = String(ancestorId)
+      let currentId = taskId
+      while (currentId && currentId !== 0 && currentId !== '0') {
+        let currentTask
+        try {
+          currentTask = gantt.getTask(currentId)
+        } catch (e) {
+          return false
+        }
+        const parentId = currentTask.parent
+        if (!parentId || parentId === 0 || parentId === '0') return false
+        if (String(parentId) === normalizedAncestorId) return true
+        currentId = parentId
+      }
+      return false
+    }
 
-    outLinks.forEach(link => {
+    const applyIncomingConstraints = (targetId) => {
       let targetTask
       try {
-        targetTask = gantt.getTask(link.target)
+        targetTask = gantt.getTask(targetId)
       } catch (e) {
-        return
+        return false
       }
 
-      const linkType = reverseLinkTypeMap[String(link.type)] || 'FS'
-      const targetOriginalStart = new Date(targetTask.start_date)
-      const targetDuration = targetTask.duration || 1
-      let newStart, newEnd
+      const incomingLinks = getIncomingLinks(targetId)
+      if (!incomingLinks.length) return false
 
-      if (linkType === 'FS') {
-        // 完成-开始：后继开始日 = 前驱结束日
-        newStart = new Date(task.end_date)
-        newEnd = gantt.calculateEndDate(newStart, targetDuration)
-      } else if (linkType === 'SS') {
-        // 开始-开始：后继开始日 = 前驱开始日
-        newStart = new Date(task.start_date)
-        newEnd = gantt.calculateEndDate(newStart, targetDuration)
-      } else if (linkType === 'FF') {
-        // 完成-完成：后继结束日 = 前驱结束日
-        newEnd = new Date(task.end_date)
-        newStart = gantt.calculateEndDate(newEnd, -targetDuration)
-      } else if (linkType === 'SF') {
-        // 开始-完成：后继结束日 = 前驱开始日
-        newEnd = new Date(task.start_date)
-        newStart = gantt.calculateEndDate(newEnd, -targetDuration)
-      } else {
-        return
+      let requiredStart = null
+      let requiredEnd = null
+      incomingLinks.forEach(link => {
+        // 父任务由子任务汇总得出，父->子依赖属于展示/汇总关系，不应锁死子任务前移。
+        if (isAncestorTask(link.source, targetId)) {
+          return
+        }
+
+        let sourceTask
+        try {
+          sourceTask = gantt.getTask(link.source)
+        } catch (e) {
+          return
+        }
+
+        const linkType = reverseLinkTypeMap[String(link.type)] || 'FS'
+        if (linkType === 'FS') {
+          requiredStart = maxDate(requiredStart, sourceTask.end_date)
+        } else if (linkType === 'SS') {
+          requiredStart = maxDate(requiredStart, sourceTask.start_date)
+        } else if (linkType === 'FF') {
+          requiredEnd = maxDate(requiredEnd, sourceTask.end_date)
+        } else if (linkType === 'SF') {
+          requiredEnd = maxDate(requiredEnd, sourceTask.start_date)
+        }
+      })
+
+      const duration = targetTask.duration || 1
+      const originalStart = new Date(targetTask.start_date)
+      const originalEnd = new Date(targetTask.end_date || gantt.calculateEndDate(targetTask.start_date, duration))
+      let newStart = new Date(originalStart)
+      let newEnd = new Date(originalEnd)
+
+      // 按约束精确重算：允许前移和后移。
+      if (requiredStart) {
+        newStart = new Date(requiredStart)
+        newEnd = gantt.calculateEndDate(newStart, duration)
+      }
+      if (requiredEnd) {
+        if (!requiredStart) {
+          newEnd = new Date(requiredEnd)
+          newStart = gantt.calculateEndDate(newEnd, -duration)
+        } else if (newEnd.getTime() < requiredEnd.getTime()) {
+          // 同时有开始/结束约束时，取更严格的结束约束，再保证开始约束不被破坏
+          newEnd = new Date(requiredEnd)
+          newStart = gantt.calculateEndDate(newEnd, -duration)
+          if (newStart.getTime() < requiredStart.getTime()) {
+            newStart = new Date(requiredStart)
+            newEnd = gantt.calculateEndDate(newStart, duration)
+          }
+        }
       }
 
-      // 只在日期实际变化时更新
-      if (targetTask.start_date.getTime() === newStart.getTime() &&
-          targetTask.end_date.getTime() === newEnd.getTime()) {
-        return
+      if (originalStart.getTime() === newStart.getTime() && originalEnd.getTime() === newEnd.getTime()) {
+        return false
       }
 
-      // 更新后继任务时间（保留自定义属性，防止 updateTask 丢失）
-      const savedPreTaskCode = targetTask.pre_task_code
-      const savedLogicRelation = targetTask.logic_relation
       targetTask.start_date = newStart
       targetTask.end_date = newEnd
-      gantt.updateTask(link.target)  // 关键：通知 gantt 刷新该任务
-      // 恢复可能被 updateTask 清除的自定义属性
-      if (!targetTask.pre_task_code && savedPreTaskCode) {
-        targetTask.pre_task_code = savedPreTaskCode
-      }
-      if (!targetTask.logic_relation && savedLogicRelation) {
-        targetTask.logic_relation = savedLogicRelation
-      }
+      targetTask.duration = gantt.calculateDuration(newStart, newEnd)
       recordChange(targetTask)
-
-      // 后继的子任务也需要跟随移动
-      const delta = newStart.getTime() - targetOriginalStart.getTime()
+      
+      const delta = newStart.getTime() - originalStart.getTime()
       if (delta !== 0) {
-        cascadeChildren(targetTask, targetOriginalStart)
+        cascadeChildren(targetTask, originalStart)
       }
+      return true
+    }
 
-      // 递归沿链传播
-      cascadeByLinks(link.target, visited)
-    })
+    while (queue.length > 0) {
+      const currentId = String(queue.shift())
+      inQueue.delete(currentId)
+
+      const outLinks = getOutgoingLinks(currentId)
+      const targetIds = [...new Set(outLinks.map(link => String(link.target)))]
+      targetIds.forEach(targetId => {
+        const changed = applyIncomingConstraints(targetId)
+        if (changed && !inQueue.has(targetId)) {
+          queue.push(targetId)
+          inQueue.add(targetId)
+        }
+      })
+    }
   }
 
    /**
@@ -671,7 +779,6 @@ const initGantt = () => {
            parent.start_date = minStart
            parent.end_date = maxEnd
            parent.duration = gantt.calculateDuration(minStart, maxEnd)
-           gantt.updateTask(parentId)
            recordChange(parent)
 
            // 新增：父任务日期变化后，级联调整与它有FS关系的后续任务
@@ -725,9 +832,20 @@ const initGantt = () => {
     return true
   })
 
-  // 任务编辑后
+  // 任务编辑后：记录变更，并在非级联状态下触发依赖传播
   gantt.attachEvent('onAfterTaskUpdate', function (id, task) {
     recordChange(task)
+    
+    if (!cascadeInProgress) {
+      cascadeInProgress = true
+      try {
+        cascadeByLinks(id)
+        updateParentDates(task)
+        gantt.render()
+      } finally {
+        cascadeInProgress = false
+      }
+    }
     return true
   })
 
@@ -764,8 +882,13 @@ const initGantt = () => {
 
       // 立即按新依赖关系调整时间（使用 setTimeout 确保 link 已完全入库）
       setTimeout(() => {
-        cascadeByLinks(link.source)
-        gantt.render()
+        cascadeInProgress = true
+        try {
+          cascadeByLinks(link.source)
+          gantt.render()
+        } finally {
+          cascadeInProgress = false
+        }
       }, 0)
     } catch (e) {
       console.warn('处理连线新增失败:', e)
@@ -779,7 +902,7 @@ const initGantt = () => {
       const targetTask = gantt.getTask(link.target)
       targetTask.pre_task_code = ''
       targetTask.logic_relation = 'FS'
-      recordChange(targetTask)
+      recordChange(targetTask, { clearDependencies: true })
     } catch (e) { /* ignore */ }
     return true
   })
@@ -842,7 +965,8 @@ const initGantt = () => {
 // ========================
 // 记录变更
 // ========================
-const recordChange = (task) => {
+const recordChange = (task, options = {}) => {
+  const { clearDependencies = false } = options
   const startDate = task.start_date instanceof Date
     ? formatDate(task.start_date)
     : task.start_date
@@ -865,18 +989,16 @@ const recordChange = (task) => {
     ? null
     : rawParent
 
-  // 从 gantt 内部 link 数据回查 pre_task_code，防止自定义属性在 updateTask 后丢失
-  let preTaskCode = task.pre_task_code || ''
-  let logicRelation = task.logic_relation || 'FS'
-  if (!preTaskCode && task.$target && Array.isArray(task.$target) && task.$target.length > 0) {
-    try {
-      const incomingLink = gantt.getLink(task.$target[0])
-      if (incomingLink && incomingLink.source) {
-        preTaskCode = String(incomingLink.source)
-        logicRelation = reverseLinkTypeMap[String(incomingLink.type)] || 'FS'
-      }
-    } catch (e) { /* ignore */ }
+  // 从入向连线构建依赖数组，支持一个任务多个前置任务。
+  const previous = changedTasks.value.get(task.id)
+  let dependencies = buildDependenciesFromIncomingLinks(task.id)
+  if (!clearDependencies && dependencies.length === 0 && Array.isArray(previous?.dependencies)) {
+    dependencies = previous.dependencies
   }
+
+  const primaryDependency = dependencies[0] || null
+  const preTaskCode = primaryDependency ? String(primaryDependency.predecessor_task_id) : ''
+  const logicRelation = primaryDependency?.logic_relation || 'FS'
 
   changedTasks.value.set(task.id, {
     plan_task_id: task.id,
@@ -890,6 +1012,7 @@ const recordChange = (task) => {
     task_name: task.text,
     pre_task_code: preTaskCode,
     logic_relation: logicRelation,
+    dependencies: dependencies,
     task_level: task.task_level || 1
   })
   pendingChanges.value = changedTasks.value.size
@@ -943,7 +1066,31 @@ const convertFlatTasks = (tasks) => {
 
   const ganttData = []
   const ganttLinks = []
+  const taskIdMap = new Map()
+  const linkKeySet = new Set()
   let linkId = 1
+
+  const registerTaskId = (value) => {
+    const normalized = normalizeTaskId(value)
+    if (!normalized) return
+    taskIdMap.set(normalized, value)
+    const numeric = Number(normalized)
+    if (!Number.isNaN(numeric)) {
+      taskIdMap.set(String(numeric), value)
+    }
+  }
+
+  const resolveTaskId = (value) => {
+    const normalized = normalizeTaskId(value)
+    if (!normalized) return null
+    if (taskIdMap.has(normalized)) return taskIdMap.get(normalized)
+    const numeric = Number(normalized)
+    if (!Number.isNaN(numeric)) {
+      const numericKey = String(numeric)
+      if (taskIdMap.has(numericKey)) return taskIdMap.get(numericKey)
+    }
+    return null
+  }
 
   tasks.forEach((task, index) => {
     const startDate = task.planned_start_date
@@ -978,19 +1125,34 @@ const convertFlatTasks = (tasks) => {
       logic_relation: task.logic_relation || 'FS',
       task_level: task.task_level || 1
     })
+    registerTaskId(task.plan_task_id)
+  })
 
-    // 从 pre_task_code 构建依赖连线
-    if (task.pre_task_code) {
-      const sourceId = Number(task.pre_task_code)
-      if (sourceId > 0) {
-        ganttLinks.push({
-          id: linkId++,
-          source: sourceId,
-          target: task.plan_task_id,
-          type: linkTypeMap[task.logic_relation] || '0'
-        })
-      }
-    }
+  // 优先使用 dependencies 构建连线，向后兼容 pre_task_code。
+  tasks.forEach(task => {
+    const rawDependencies = Array.isArray(task.dependencies) && task.dependencies.length > 0
+      ? task.dependencies
+      : (task.pre_task_code
+        ? [{ predecessor_task_id: task.pre_task_code, logic_relation: task.logic_relation || 'FS', sort_order: 0 }]
+        : [])
+
+    rawDependencies.forEach(dep => {
+      const sourceId = resolveTaskId(dep.predecessor_task_id)
+      const targetId = resolveTaskId(task.plan_task_id) || task.plan_task_id
+      if (sourceId == null || targetId == null) return
+      if (normalizeTaskId(sourceId) === normalizeTaskId(targetId)) return
+
+      const linkKey = `${normalizeTaskId(sourceId)}->${normalizeTaskId(targetId)}:${dep.logic_relation || 'FS'}`
+      if (linkKeySet.has(linkKey)) return
+      linkKeySet.add(linkKey)
+
+      ganttLinks.push({
+        id: linkId++,
+        source: sourceId,
+        target: targetId,
+        type: linkTypeMap[dep.logic_relation] || '0'
+      })
+    })
   })
 
   return { data: ganttData, links: ganttLinks }
