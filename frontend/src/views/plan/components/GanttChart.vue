@@ -113,6 +113,7 @@ const pendingChanges = ref(0)
 const saving = ref(false)
 const changedTasks = ref(new Map())
 let ganttInitialized = false
+let loadingInProgress = false
 
 // ========================
 // 连线编辑弹窗
@@ -834,6 +835,9 @@ const initGantt = () => {
 
   // 任务编辑后：记录变更，并在非级联状态下触发依赖传播
   gantt.attachEvent('onAfterTaskUpdate', function (id, task) {
+    // 数据加载期间不记录变更也不级联，避免 parse() 触发二次调度
+    if (loadingInProgress) return true
+
     recordChange(task)
     
     if (!cascadeInProgress) {
@@ -1030,34 +1034,39 @@ const formatDate = (date) => {
 // ========================
 const loadTasks = () => {
   if (!ganttInitialized) return
-  gantt.clearAll()
+  loadingInProgress = true
+  try {
+    gantt.clearAll()
 
-  let ganttData, ganttLinks
-  if (props.flatTasks.length > 0) {
-    const result = convertFlatTasks(props.flatTasks)
-    ganttData = result.data
-    ganttLinks = result.links
-  } else {
-    const result = flattenTreeTasks(props.tasks)
-    ganttData = result.data
-    ganttLinks = result.links
-  }
+    let ganttData, ganttLinks
+    if (props.flatTasks.length > 0) {
+      const result = convertFlatTasks(props.flatTasks)
+      ganttData = result.data
+      ganttLinks = result.links
+    } else {
+      const result = flattenTreeTasks(props.tasks)
+      ganttData = result.data
+      ganttLinks = result.links
+    }
 
-  if (ganttData.length === 0) {
+    if (ganttData.length === 0) {
+      gantt.render()
+      return
+    }
+
+    gantt.parse({
+      data: ganttData,
+      links: ganttLinks
+    })
+
+    // 全部展开
+    gantt.eachTask(function (task) {
+      task.$open = true
+    })
     gantt.render()
-    return
+  } finally {
+    loadingInProgress = false
   }
-
-  gantt.parse({
-    data: ganttData,
-    links: ganttLinks
-  })
-
-  // 全部展开
-  gantt.eachTask(function (task) {
-    task.$open = true
-  })
-  gantt.render()
 }
 
 // 将后端扁平数据直接转换为甘特图格式
