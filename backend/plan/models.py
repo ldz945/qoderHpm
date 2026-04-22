@@ -107,6 +107,8 @@ class PlanTask(models.Model):
     progress_percent = models.DecimalField(
         max_digits=5, decimal_places=2, default=0, verbose_name='完成百分比'
     )
+    baseline_start_date = models.DateField(null=True, blank=True, verbose_name='基线开始日期')
+    baseline_end_date = models.DateField(null=True, blank=True, verbose_name='基线结束日期')
     include_weekend = models.CharField(max_length=1, default='N', verbose_name='包含周末')
     version = models.ForeignKey(
         PlanVersion,

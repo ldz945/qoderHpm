@@ -164,6 +164,7 @@ class PlanTaskTreeSerializer(serializers.ModelSerializer):
             'authorized_owner', 'planned_start_date', 'planned_end_date',
             'workload_days', 'task_status', 'has_deliverable', 'is_hour_task',
             'acceptance_item', 'remark', 'phase', 'progress_percent',
+            'baseline_start_date', 'baseline_end_date',
             'include_weekend', 'version', 'sort_order', 'dependencies', 'children',
             'created_at', 'updated_at'
         ]

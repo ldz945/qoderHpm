@@ -129,138 +129,112 @@ let loadingInProgress = false
 let baselineBandEl = null
 let taskBaselineLayerId = null
 
-const parseDateValue = (value) => {
+// ========================
+// 基线辅助函数
+// ========================
+const parseDateSafe = (value) => {
   if (!value) return null
   if (value instanceof Date) return new Date(value)
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 const getProjectBaselineRange = () => {
   if (!props.showBaseline || !props.baseline) return null
-
-  const start = parseDateValue(
-    props.baseline.baseline_start_date ||
-    props.baseline.start_date ||
-    props.baseline.planned_start_date
-  )
-  const end = parseDateValue(
-    props.baseline.baseline_end_date ||
-    props.baseline.end_date ||
-    props.baseline.planned_end_date
-  )
-
-  if (!start || !end) return null
-  if (end.getTime() < start.getTime()) return null
-
-  return {
-    start,
-    end,
-    label: props.baseline.label || '项目基线'
-  }
+  const start = parseDateSafe(props.baseline.baseline_start_date || props.baseline.start_date || props.baseline.planned_start_date)
+  const end = parseDateSafe(props.baseline.baseline_end_date || props.baseline.end_date || props.baseline.planned_end_date)
+  if (!start || !end || end < start) return null
+  return { start, end, label: props.baseline.label || '项目基线' }
 }
 
 const getTaskBaselineRange = (task) => {
   if (!task) return null
-
-  const start = parseDateValue(
-    task.baseline_start_date ||
-    task.baselineStart ||
-    task.baseline_start ||
-    task.original_start_date
-  )
-  const end = parseDateValue(
-    task.baseline_end_date ||
-    task.baselineEnd ||
-    task.baseline_end ||
-    task.original_end_date
-  )
-
-  if (!start || !end) return null
-  if (end.getTime() < start.getTime()) return null
+  const start = parseDateSafe(task.baseline_start_date || task.baselineStart || task.original_start_date)
+  const end = parseDateSafe(task.baseline_end_date || task.baselineEnd || task.original_end_date)
+  if (!start || !end || end < start) return null
   return { start, end }
 }
 
 const renderProjectBaselineBand = () => {
-  if (!ganttInitialized) return
-
-  const timeline = gantt.$task_data
-  if (!timeline) return
-
-  if (!baselineBandEl) {
-    baselineBandEl = document.createElement('div')
-    baselineBandEl.className = 'project-baseline-band'
-    timeline.appendChild(baselineBandEl)
-  }
-
-  const baseline = getProjectBaselineRange()
-  if (!baseline) {
-    baselineBandEl.style.display = 'none'
-    return
-  }
-
-  const startX = gantt.posFromDate(baseline.start)
-  // dhtmlx-gantt 的 end_date 通常按右开区间处理，这里向后扩 1 天保证可见区间完整覆盖。
-  const endInclusive = new Date(baseline.end.getTime() + 24 * 60 * 60 * 1000)
-  const endX = gantt.posFromDate(endInclusive)
-
-  if (!Number.isFinite(startX) || !Number.isFinite(endX)) {
-    baselineBandEl.style.display = 'none'
-    return
-  }
-
-  const left = Math.min(startX, endX)
-  const width = Math.max(2, Math.abs(endX - startX))
-
-  baselineBandEl.style.display = 'block'
-  baselineBandEl.style.left = `${left}px`
-  baselineBandEl.style.width = `${width}px`
-  baselineBandEl.setAttribute('data-label', baseline.label)
-  baselineBandEl.title = `${baseline.label}: ${formatDate(baseline.start)} ~ ${formatDate(baseline.end)}`
-}
-
-const removeProjectBaselineBand = () => {
-  if (baselineBandEl && baselineBandEl.parentNode) {
-    baselineBandEl.parentNode.removeChild(baselineBandEl)
-  }
-  baselineBandEl = null
-}
-
-const initTaskBaselineLayer = () => {
-  if (taskBaselineLayerId != null) return
-
-  taskBaselineLayerId = gantt.addTaskLayer(function (task) {
-    if (!props.showTaskBaselines) return false
-
-    const baseline = getTaskBaselineRange(task)
-    if (!baseline) return false
-
-    const pos = gantt.getTaskPosition(task, baseline.start, baseline.end)
-    if (!pos || !Number.isFinite(pos.left) || !Number.isFinite(pos.width)) return false
-
-    const el = document.createElement('div')
-    el.className = 'gantt-task-baseline-bar'
-    el.style.left = `${pos.left}px`
-    el.style.width = `${Math.max(2, pos.width)}px`
-    el.style.top = `${pos.top + gantt.config.bar_height + 1}px`
-    el.title = `任务基线: ${formatDate(baseline.start)} ~ ${formatDate(baseline.end)}`
-    return el
-  })
-}
-
-const removeTaskBaselineLayer = () => {
-  if (taskBaselineLayerId == null) return
   try {
-    gantt.removeTaskLayer(taskBaselineLayerId)
+    if (!ganttInitialized) return
+    const timeline = gantt.$task_data
+    if (!timeline) return
+    if (!baselineBandEl) {
+      baselineBandEl = document.createElement('div')
+      baselineBandEl.className = 'project-baseline-band'
+      timeline.appendChild(baselineBandEl)
+    }
+    const baseline = getProjectBaselineRange()
+    if (!baseline) {
+      baselineBandEl.style.display = 'none'
+      return
+    }
+    const startX = gantt.posFromDate(baseline.start)
+    const endX = gantt.posFromDate(new Date(baseline.end.getTime() + 86400000))
+    if (!Number.isFinite(startX) || !Number.isFinite(endX)) {
+      baselineBandEl.style.display = 'none'
+      return
+    }
+    const left = Math.min(startX, endX)
+    const width = Math.max(2, Math.abs(endX - startX))
+    baselineBandEl.style.display = 'block'
+    baselineBandEl.style.left = left + 'px'
+    baselineBandEl.style.width = width + 'px'
+    baselineBandEl.setAttribute('data-label', baseline.label)
+    baselineBandEl.title = baseline.label + ': ' + formatDate(baseline.start) + ' ~ ' + formatDate(baseline.end)
   } catch (e) {
-    // ignore when layer API is unavailable in some builds
+    // 基线渲染失败不影响主功能
   }
-  taskBaselineLayerId = null
 }
 
 // ========================
 // 连线编辑弹窗
 // ========================
+
+/**
+ * 手动绘制任务级基线条（兼容 GPL 版本，不依赖 addTaskLayer）
+ * 在 gantt 的 timeline 区域为每个有基线数据的任务画一条灰色小条
+ */
+const renderTaskBaselines = () => {
+  try {
+    if (!ganttInitialized || !props.showTaskBaselines) return
+
+    const timeline = gantt.$task_data
+    if (!timeline) return
+
+    // 清除旧的基线条
+    const oldBars = timeline.querySelectorAll('.gantt-task-baseline-bar')
+    oldBars.forEach(el => el.remove())
+
+    gantt.eachTask(function (task) {
+      if (!task.baseline_start_date || !task.baseline_end_date) return
+
+      const bStart = new Date(task.baseline_start_date)
+      const bEnd = new Date(task.baseline_end_date)
+      if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) return
+      if (bEnd < bStart) return
+
+      // 检查任务是否在可见区域（已展开且未被折叠隐藏）
+      if (!gantt.isTaskVisible(task.id)) return
+
+      const pos = gantt.getTaskPosition(task, bStart, bEnd)
+      if (!pos) return
+
+      const el = document.createElement('div')
+      el.className = 'gantt-task-baseline-bar'
+      el.style.left = pos.left + 'px'
+      el.style.width = Math.max(4, pos.width) + 'px'
+      // 任务条在行内垂直居中，计算任务条底部位置
+      const barTop = pos.top + (gantt.config.row_height - gantt.config.bar_height) / 2
+      el.style.top = (barTop + gantt.config.bar_height) + 'px'
+      el.title = '基线: ' + task.baseline_start_date + ' ~ ' + task.baseline_end_date
+      timeline.appendChild(el)
+    })
+  } catch (e) {
+    // 基线渲染失败不影响主功能
+  }
+}
 const linkModalVisible = ref(false)
 const linkModalData = reactive({
   linkId: null,
@@ -456,7 +430,7 @@ const initGantt = () => {
   gantt.config.auto_scheduling = false
   gantt.config.round_dnd_dates = true
   gantt.config.open_tree_initially = true
-  gantt.config.row_height = 36
+  gantt.config.row_height = 40
   gantt.config.bar_height = 24
   gantt.config.scale_height = 54
 
@@ -629,17 +603,6 @@ const initGantt = () => {
     css: 'today-marker',
     text: '今天',
     title: `今天: ${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  })
-
-  // 甘特图重绘后同步刷新项目周期基线
-  gantt.attachEvent('onGanttRender', function () {
-    renderProjectBaselineBand()
-    return true
-  })
-
-  gantt.attachEvent('onDataRender', function () {
-    renderProjectBaselineBand()
-    return true
   })
 
   // ========================
@@ -1112,12 +1075,19 @@ const initGantt = () => {
   gantt.ext.zoom.init(zoomConfig)
   gantt.ext.zoom.setLevel('day')
 
-  // 任务级基线条
-  initTaskBaselineLayer()
-
   // 初始化
   gantt.init(ganttContainer.value)
   ganttInitialized = true
+
+  // 注册基线渲染（通过 onGanttRender 事件手动绘制，兼容 GPL 版本）
+  gantt.attachEvent('onGanttRender', function () {
+    renderTaskBaselines()
+    return true
+  })
+  gantt.attachEvent('onDataRender', function () {
+    renderTaskBaselines()
+    return true
+  })
 
   // 加载数据
   loadTasks()
@@ -1208,7 +1178,6 @@ const loadTasks = () => {
 
     if (ganttData.length === 0) {
       gantt.render()
-      renderProjectBaselineBand()
       return
     }
 
@@ -1222,7 +1191,6 @@ const loadTasks = () => {
       task.$open = true
     })
     gantt.render()
-    renderProjectBaselineBand()
   } finally {
     loadingInProgress = false
   }
@@ -1276,7 +1244,6 @@ const convertFlatTasks = (tasks) => {
 
     const phase = task.phase || ''
     const phaseInfo = getPhaseColor(phase)
-    const baseline = getTaskBaselineRange(task)
 
     ganttData.push({
       id: task.plan_task_id,
@@ -1293,13 +1260,13 @@ const convertFlatTasks = (tasks) => {
       pre_task_code: task.pre_task_code || '',
       logic_relation: task.logic_relation || 'FS',
       task_level: task.task_level || 1,
-      baseline_start_date: baseline ? formatDate(baseline.start) : '',
-      baseline_end_date: baseline ? formatDate(baseline.end) : ''
+      baseline_start_date: task.baseline_start_date || '',
+      baseline_end_date: task.baseline_end_date || ''
     })
     registerTaskId(task.plan_task_id)
   })
 
-  // 优先使用 dependencies 构建连线，向后兼容 pre_task_code。
+  // 优先使用 dependencies 构建连线，向后兼容预留字段 pre_task_code。
   tasks.forEach(task => {
     const rawDependencies = Array.isArray(task.dependencies) && task.dependencies.length > 0
       ? task.dependencies
@@ -1350,7 +1317,6 @@ const flattenTreeTasks = (tasks, parentId = 0, sortStart = 0) => {
 
     const phase = task.phase || ''
     const phaseInfo = getPhaseColor(phase)
-    const baseline = getTaskBaselineRange(task)
 
     const ganttTask = {
       id: task.plan_task_id || task.id,
@@ -1367,8 +1333,8 @@ const flattenTreeTasks = (tasks, parentId = 0, sortStart = 0) => {
       pre_task_code: task.pre_task_code || task.preTask || '',
       logic_relation: task.logic_relation || task.logicRelation || 'FS',
       task_level: task.task_level || 1,
-      baseline_start_date: baseline ? formatDate(baseline.start) : '',
-      baseline_end_date: baseline ? formatDate(baseline.end) : ''
+      baseline_start_date: task.baseline_start_date || '',
+      baseline_end_date: task.baseline_end_date || ''
     }
 
     result.push(ganttTask)
@@ -1387,7 +1353,6 @@ const flattenTreeTasks = (tasks, parentId = 0, sortStart = 0) => {
 // ========================
 const handleZoomChange = () => {
   gantt.ext.zoom.setLevel(zoomLevel.value)
-  renderProjectBaselineBand()
 }
 
 const handleExpandAll = () => {
@@ -1422,7 +1387,6 @@ const handleFitToView = () => {
     gantt.config.start_date = minDate
     gantt.config.end_date = maxDate
     gantt.render()
-    renderProjectBaselineBand()
   }
 }
 
@@ -1471,29 +1435,17 @@ watch(() => props.active, (isActive) => {
   }
 }, { immediate: true })
 
+// 监听基线参数变化
 watch(() => props.baseline, () => {
-  if (ganttInitialized) {
-    nextTick(() => {
-      renderProjectBaselineBand()
-    })
-  }
+  if (ganttInitialized) nextTick(() => renderProjectBaselineBand())
 }, { deep: true })
 
 watch(() => props.showBaseline, () => {
-  if (ganttInitialized) {
-    nextTick(() => {
-      renderProjectBaselineBand()
-    })
-  }
+  if (ganttInitialized) nextTick(() => renderProjectBaselineBand())
 })
 
 watch(() => props.showTaskBaselines, () => {
-  if (ganttInitialized) {
-    nextTick(() => {
-      gantt.render()
-      renderProjectBaselineBand()
-    })
-  }
+  if (ganttInitialized) nextTick(() => renderTaskBaselines())
 })
 
 // 对外暴露方法
@@ -1513,11 +1465,14 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // 清理项目基线带
+  if (baselineBandEl && baselineBandEl.parentNode) {
+    baselineBandEl.parentNode.removeChild(baselineBandEl)
+    baselineBandEl = null
+  }
   if (ganttInitialized) {
     gantt.clearAll()
   }
-  removeTaskBaselineLayer()
-  removeProjectBaselineBand()
 })
 </script>
 
@@ -1805,6 +1760,26 @@ onBeforeUnmount(() => {
   background: #e6f7ff !important;
 }
 
+/* 基线样式 */
+.gantt_task_baseline {
+  position: absolute;
+  z-index: 1;
+  border-radius: 4px;
+  opacity: 0.2;
+}
+
+.gantt_task_baseline_line {
+  position: absolute;
+  z-index: 1;
+  border-radius: 4px;
+  opacity: 0.4;
+}
+
+/* 隐藏基线任务的默认文本 */
+.gantt_task_baseline .gantt_task_content {
+  display: none;
+}
+
 /* 项目周期基线带 */
 .project-baseline-band {
   position: absolute;
@@ -1837,11 +1812,12 @@ onBeforeUnmount(() => {
 .gantt-task-baseline-bar {
   position: absolute;
   height: 4px;
-  border-radius: 2px;
-  background: rgba(89, 89, 89, 0.5);
-  border: 1px solid rgba(89, 89, 89, 0.7);
+  border-radius: 3px;
+  background: #000;
+  border: 1px solid #000;
   box-sizing: border-box;
   pointer-events: none;
-  z-index: 2;
+  z-index: 5;
+  opacity: 0.5;
 }
 </style>
