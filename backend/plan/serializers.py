@@ -98,6 +98,9 @@ class PlanTaskSerializer(serializers.ModelSerializer):
         model = PlanTask
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
+        extra_kwargs = {
+            'created_by': {'required': False, 'allow_blank': True},
+        }
 
     def validate(self, attrs):
         baseline_start = attrs.get(
@@ -134,6 +137,13 @@ class PlanTaskSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         dependencies = validated_data.pop('dependencies', None)
+        if not validated_data.get('created_by'):
+            request = self.context.get('request')
+            request_user = getattr(request, 'user', None)
+            fallback_creator = ''
+            if request_user and getattr(request_user, 'is_authenticated', False):
+                fallback_creator = request_user.get_username()
+            validated_data['created_by'] = fallback_creator or 'system'
         task = super().create(validated_data)
 
         if dependencies is None and task.pre_task_code not in (None, '', 0, '0'):

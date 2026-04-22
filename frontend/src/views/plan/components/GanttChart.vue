@@ -493,7 +493,14 @@ const phaseColorMap = {
   '需求阶段': { bar: '#eb2f96', text: '需求' },
 }
 const defaultPhaseColor = { bar: '#8c8c8c', text: '未分类' }
-const getPhaseColor = (phase) => phaseColorMap[phase] || defaultPhaseColor
+const getPhaseColor = (phase) => {
+  const normalized = phase == null ? '' : String(phase).trim()
+  if (phaseColorMap[normalized]) return phaseColorMap[normalized]
+  if (normalized) {
+    return { bar: defaultPhaseColor.bar, text: normalized }
+  }
+  return defaultPhaseColor
+}
 
 // 依赖类型映射：后端 FS/SF/FF/SS <-> dhtmlx link type 0/1/2/3
 const linkTypeMap = { 'FS': '0', 'SF': '1', 'FF': '2', 'SS': '3' }

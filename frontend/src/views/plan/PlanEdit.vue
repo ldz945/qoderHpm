@@ -27,6 +27,7 @@
           </span>
         </div>
         <a-table
+          class="task-plan-table"
           :columns="taskColumns"
           :data-source="planTasks"
           :loading="loading"
@@ -34,6 +35,7 @@
           :pagination="false"
           children-column-name="children"
           :default-expand-all-rows="true"
+          :scroll="{ x: 2100 }"
         >
           <template #bodyCell="{ column, record, index }">
             <!-- 层级编码 -->
@@ -53,18 +55,17 @@
 
             <!-- 阶段 -->
             <template v-if="column.key === 'phase'">
-              <a-select
+              <a-auto-complete
                 v-if="record.editing"
                 v-model:value="record.phase"
                 size="small"
-                style="width: 100px"
+                :options="getPhaseInputOptions(record.phase)"
+                :filter-option="filterPhaseOption"
+                style="width: 100%"
+                @select="handlePhaseSelect(record, $event)"
+                @blur="handlePhaseBlur(record)"
               >
-                <a-select-option value="init">立项</a-select-option>
-                <a-select-option value="design">设计</a-select-option>
-                <a-select-option value="development">开发</a-select-option>
-                <a-select-option value="test">测试</a-select-option>
-                <a-select-option value="delivery">交付</a-select-option>
-              </a-select>
+              </a-auto-complete>
               <span v-else>{{ getPhaseText(record.phase) }}</span>
             </template>
 
@@ -131,6 +132,7 @@
                 v-model:value="record.planStart"
                 size="small"
                 value-format="YYYY-MM-DD"
+                @change="handleTaskPlanStartChange(record)"
               />
               <span v-else>{{ record.planStart }}</span>
             </template>
@@ -142,6 +144,7 @@
                 v-model:value="record.planEnd"
                 size="small"
                 value-format="YYYY-MM-DD"
+                @change="handleTaskPlanEndChange(record)"
               />
               <span v-else>{{ record.planEnd }}</span>
             </template>
@@ -152,8 +155,9 @@
                 v-if="record.editing"
                 v-model:value="record.workload"
                 size="small"
-                :min="0"
-                style="width: 70px"
+                :min="1"
+                style="width: 96px"
+                @change="handleTaskWorkloadChange(record)"
               />
               <span v-else>{{ record.workload }}天</span>
             </template>
@@ -198,7 +202,7 @@
                   平级添加
                 </a-button>
                 <a-button
-                  v-if="record.status === 'draft'"
+                  v-if="record.status === 'draft' || record.status === 'NOT_STARTED'"
                   type="link"
                   danger
                   size="small"
@@ -419,7 +423,6 @@ import { message, Modal } from 'ant-design-vue'
 import {
   getPlanTasks,
   createPlanTask,
-  updatePlanTask,
   partialUpdatePlanTask,
   deletePlanTask,
   getResourcePlans,
@@ -450,6 +453,15 @@ const projectInfo = ref({
   name: ''
 })
 
+const defaultPhaseOptions = [
+  { value: 'init', label: '立项' },
+  { value: 'design', label: '设计' },
+  { value: 'development', label: '开发' },
+  { value: 'test', label: '测试' },
+  { value: 'delivery', label: '交付' }
+]
+const customPhaseOptions = ref([])
+
 const resourceForm = reactive({
   resourceType: undefined,
   resourceCode: '',
@@ -466,21 +478,21 @@ const resourceForm = reactive({
 // 任务表格列
 const taskColumns = [
   { title: '层级编码', dataIndex: 'wbsCode', key: 'wbsCode', width: 120 },
-  { title: '任务名称', dataIndex: 'name', key: 'name', width: 200 },
-  { title: '阶段', dataIndex: 'phase', key: 'phase', width: 100 },
-  { title: '部门', dataIndex: 'department', key: 'department', width: 120 },
-  { title: '任务负责人', dataIndex: 'owner', key: 'owner', width: 120 },
-  { title: '被授权人', dataIndex: 'delegate', key: 'delegate', width: 120 },
-  { title: '逻辑关系', dataIndex: 'logicRelation', key: 'logicRelation', width: 90 },
-  { title: '紧前任务', dataIndex: 'preTask', key: 'preTask', width: 120 },
-  { title: '计划开始', dataIndex: 'planStart', key: 'planStart', width: 120 },
-  { title: '计划结束', dataIndex: 'planEnd', key: 'planEnd', width: 120 },
-  { title: '工作量(天)', dataIndex: 'workload', key: 'workload', width: 100 },
-  { title: '进度%', dataIndex: 'progress', key: 'progress', width: 80 },
+  { title: '任务名称', dataIndex: 'name', key: 'name', width: 260 },
+  { title: '阶段', dataIndex: 'phase', key: 'phase', width: 120 },
+  { title: '部门', dataIndex: 'department', key: 'department', width: 150 },
+  { title: '任务负责人', dataIndex: 'owner', key: 'owner', width: 150 },
+  { title: '被授权人', dataIndex: 'delegate', key: 'delegate', width: 150 },
+  { title: '逻辑关系', dataIndex: 'logicRelation', key: 'logicRelation', width: 110 },
+  { title: '紧前任务', dataIndex: 'preTask', key: 'preTask', width: 150 },
+  { title: '计划开始', dataIndex: 'planStart', key: 'planStart', width: 140 },
+  { title: '计划结束', dataIndex: 'planEnd', key: 'planEnd', width: 140 },
+  { title: '工作量(天)', dataIndex: 'workload', key: 'workload', width: 120 },
+  { title: '进度%', dataIndex: 'progress', key: 'progress', width: 100 },
   { title: '工时任务', dataIndex: 'isWorkHourTask', key: 'isWorkHourTask', width: 80, align: 'center' },
   { title: '交付物', dataIndex: 'hasDeliverable', key: 'hasDeliverable', width: 80, align: 'center' },
   { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
-  { title: '操作', key: 'action', width: 200, fixed: 'right' }
+  { title: '操作', key: 'action', width: 230, fixed: 'right' }
 ]
 
 const baselineColumns = [
@@ -547,6 +559,191 @@ const projectBaseline = computed(() => {
 
 const normalizeDateValue = (value) => value || null
 
+const normalizePhaseValue = (value) => {
+  if (value === null || value === undefined) return ''
+  return String(value).trim()
+}
+
+const isDefaultPhaseValue = (value) => {
+  const normalized = normalizePhaseValue(value)
+  return defaultPhaseOptions.some(option => option.value === normalized || option.label === normalized)
+}
+
+const upsertCustomPhaseOption = (value) => {
+  const normalized = normalizePhaseValue(value)
+  if (!normalized || isDefaultPhaseValue(normalized)) return
+
+  const existingIndex = customPhaseOptions.value.findIndex(option => option.value === normalized)
+  if (existingIndex >= 0) {
+    const existing = customPhaseOptions.value.splice(existingIndex, 1)[0]
+    customPhaseOptions.value.unshift(existing)
+    return
+  }
+
+  customPhaseOptions.value.unshift({
+    value: normalized,
+    label: normalized
+  })
+}
+
+const getPhaseInputOptions = (currentValue) => {
+  const normalizedCurrent = normalizePhaseValue(currentValue)
+  const options = [...customPhaseOptions.value]
+
+  if (
+    normalizedCurrent &&
+    !isDefaultPhaseValue(normalizedCurrent) &&
+    !options.some(option => option.value === normalizedCurrent)
+  ) {
+    options.unshift({ value: normalizedCurrent, label: normalizedCurrent })
+  }
+
+  return [...options, ...defaultPhaseOptions]
+}
+
+const filterPhaseOption = (input, option) => {
+  const keyword = normalizePhaseValue(input).toLowerCase()
+  const label = normalizePhaseValue(option?.label ?? option?.value).toLowerCase()
+  return label.includes(keyword)
+}
+
+const handlePhaseBlur = (task) => {
+  if (!task) return
+  const normalized = normalizePhaseValue(task.phase)
+  task.phase = normalized
+  upsertCustomPhaseOption(normalized)
+}
+
+const handlePhaseSelect = (task, value) => {
+  if (!task) return
+  const normalized = normalizePhaseValue(value)
+  task.phase = normalized
+  upsertCustomPhaseOption(normalized)
+}
+
+const parseYmdSafe = (value) => {
+  if (!value) return null
+  if (value instanceof Date) return new Date(value)
+  if (typeof value === 'string') {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (m) {
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    }
+  }
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+const formatYmd = (date) => {
+  if (!date) return null
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const addDaysYmd = (value, days) => {
+  const base = parseYmdSafe(value)
+  if (!base) return null
+  const d = new Date(base)
+  d.setDate(d.getDate() + Number(days || 0))
+  return formatYmd(d)
+}
+
+const calcWorkloadByStartEnd = (startValue, endValue) => {
+  const start = parseYmdSafe(startValue)
+  const end = parseYmdSafe(endValue)
+  if (!start || !end) return null
+  const diff = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+  return Math.max(1, diff)
+}
+
+const calcEndByStartWorkload = (startValue, workload) => {
+  const start = parseYmdSafe(startValue)
+  const wd = Number(workload)
+  if (!start || !Number.isFinite(wd) || wd <= 0) return null
+  const end = new Date(start)
+  end.setDate(end.getDate() + wd)
+  return formatYmd(end)
+}
+
+const getPrevSiblingTask = (task) => {
+  const parentId = normalizeParentId(task.parentId ?? task.parent_task)
+  const siblingList = flatTasks.value
+    .filter(item => normalizeParentId(item.parent_task) === parentId)
+    .sort((a, b) => {
+      const sa = Number(a.sort_order)
+      const sb = Number(b.sort_order)
+      if (Number.isFinite(sa) && Number.isFinite(sb) && sa !== sb) return sa - sb
+      return Number(a.plan_task_id) - Number(b.plan_task_id)
+    })
+
+  if (siblingList.length === 0) return null
+  const tail = siblingList[siblingList.length - 1]
+  return {
+    planEnd: tail.planned_end_date || tail.planEnd || null,
+    planStart: tail.planned_start_date || tail.planStart || null
+  }
+}
+
+const buildDefaultScheduleForNewTask = (task) => {
+  const prevTask = getPrevSiblingTask(task)
+  const defaultStart = prevTask?.planEnd ? addDaysYmd(prevTask.planEnd, 1) : null
+  const defaultWorkload = 1
+  const defaultEnd = defaultStart ? calcEndByStartWorkload(defaultStart, defaultWorkload) : null
+  return { defaultStart, defaultEnd, defaultWorkload }
+}
+
+const handleTaskPlanStartChange = (task) => {
+  if (!task) return
+  if (!task.planStart) return
+  const nextEnd = calcEndByStartWorkload(task.planStart, task.workload || 1)
+  if (nextEnd) {
+    task.planEnd = nextEnd
+  }
+}
+
+const handleTaskWorkloadChange = (task) => {
+  if (!task) return
+  const nextWorkload = Number(task.workload)
+  task.workload = Number.isFinite(nextWorkload) ? Math.max(1, nextWorkload) : 1
+  if (!task.planStart) return
+  const nextEnd = calcEndByStartWorkload(task.planStart, task.workload)
+  if (nextEnd) {
+    task.planEnd = nextEnd
+  }
+}
+
+const handleTaskPlanEndChange = (task) => {
+  if (!task || !task.planStart || !task.planEnd) return
+  const nextWorkload = calcWorkloadByStartEnd(task.planStart, task.planEnd)
+  if (nextWorkload != null) {
+    task.workload = nextWorkload
+  }
+}
+
+const normalizeParentId = (value) => {
+  if (value === undefined || value === null || value === '' || value === 0 || value === '0') return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+const getNextSortOrder = (parentId) => {
+  const normalizedParentId = normalizeParentId(parentId)
+  let maxSort = -1
+
+  flatTasks.value.forEach(task => {
+    const taskParentId = normalizeParentId(task.parent_task)
+    if (taskParentId !== normalizedParentId) return
+    const sort = Number(task.sort_order)
+    if (Number.isFinite(sort) && sort > maxSort) {
+      maxSort = sort
+    }
+  })
+
+  return maxSort + 1
+}
+
 const buildBaselineRows = () => {
   return flatTasks.value.map((task, index) => ({
     plan_task_id: task.plan_task_id,
@@ -570,6 +767,7 @@ const buildTree = (flatList) => {
     map[id] = {
       ...item,
       id: id,
+      parentId: item.parent_task ?? null,
       name: item.task_name,
       wbsCode: '',
       phase: item.phase || '',
@@ -585,6 +783,7 @@ const buildTree = (flatList) => {
       isWorkHourTask: item.is_hour_task === 'Y',
       hasDeliverable: item.has_deliverable === 'Y',
       status: item.task_status || 'NOT_STARTED',
+      sortOrder: item.sort_order ?? 0,
       editing: false,
       children: []
     }
@@ -787,6 +986,9 @@ const handleTaskSelect = (selectedKeys, info) => {
 
 // 添加子任务
 const handleAddChild = (parentTask) => {
+  const nextSortOrder = getNextSortOrder(parentTask.id)
+  const tempTask = { parentId: parentTask.id }
+  const { defaultStart, defaultEnd, defaultWorkload } = buildDefaultScheduleForNewTask(tempTask)
   const newTask = {
     id: Date.now(),
     projectId,
@@ -799,13 +1001,14 @@ const handleAddChild = (parentTask) => {
     delegate: '',
     logicRelation: 'FS',
     preTask: '',
-    planStart: null,
-    planEnd: null,
-    workload: 1,
+    planStart: defaultStart,
+    planEnd: defaultEnd,
+    workload: defaultWorkload,
     progress: 0,
     isWorkHourTask: false,
     hasDeliverable: false,
     status: 'draft',
+    sortOrder: nextSortOrder,
     editing: true,
     children: []
   }
@@ -819,10 +1022,14 @@ const handleAddChild = (parentTask) => {
 // 添加平级任务
 const handleAddSibling = (task) => {
   const parent = findParent(planTasks.value, task.id)
+  const siblingParentId = task.parentId ?? task.parent_task ?? null
+  const nextSortOrder = getNextSortOrder(siblingParentId)
+  const tempTask = { parentId: siblingParentId }
+  const { defaultStart, defaultEnd, defaultWorkload } = buildDefaultScheduleForNewTask(tempTask)
   const newTask = {
     id: Date.now(),
     projectId,
-    parentId: task.parentId,
+    parentId: siblingParentId,
     wbsCode: task.wbsCode,
     name: '新任务',
     phase: 'development',
@@ -831,13 +1038,14 @@ const handleAddSibling = (task) => {
     delegate: '',
     logicRelation: 'FS',
     preTask: '',
-    planStart: null,
-    planEnd: null,
-    workload: 1,
+    planStart: defaultStart,
+    planEnd: defaultEnd,
+    workload: defaultWorkload,
     progress: 0,
     isWorkHourTask: false,
     hasDeliverable: false,
     status: 'draft',
+    sortOrder: nextSortOrder,
     editing: true
   }
   if (parent) {
@@ -886,20 +1094,22 @@ const handleSaveTask = async (task) => {
       progress_percent: task.progress,
       is_hour_task: task.isWorkHourTask ? 'Y' : 'N',
       has_deliverable: task.hasDeliverable ? 'Y' : 'N',
+      sort_order: task.sortOrder ?? getNextSortOrder(task.parentId ?? task.parent_task ?? null)
     }
 
     if (task.id && String(task.id).length < 13) {
-      await updatePlanTask(task.id, payload)
+      await partialUpdatePlanTask(task.id, payload)
     } else {
       payload.project = projectId
-      if (task.parentId) {
-        payload.parent_task_id = task.parentId
+      const parentTaskId = normalizeParentId(task.parentId ?? task.parent_task)
+      if (parentTaskId) {
+        payload.parent_task_id = parentTaskId
       }
       await createPlanTask(payload)
     }
     task.editing = false
     message.success('保存成功')
-    fetchTasks()
+    await fetchTasks()
   } catch (error) {
     message.error('保存失败')
   }
@@ -1082,6 +1292,34 @@ onMounted(fetchTasks)
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+:deep(.task-plan-table .ant-table-container) {
+  border-radius: 8px;
+}
+
+:deep(.task-plan-table .ant-table-thead > tr > th) {
+  padding: 12px 10px;
+  font-weight: 600;
+}
+
+:deep(.task-plan-table .ant-table-tbody > tr > td) {
+  padding: 10px;
+  vertical-align: middle;
+}
+
+:deep(.task-plan-table .ant-input),
+:deep(.task-plan-table .ant-select),
+:deep(.task-plan-table .ant-picker),
+:deep(.task-plan-table .ant-input-number) {
+  width: 100% !important;
+}
+
+:deep(.task-plan-table .ant-input),
+:deep(.task-plan-table .ant-select-selector),
+:deep(.task-plan-table .ant-picker),
+:deep(.task-plan-table .ant-input-number) {
+  border-radius: 6px;
 }
 
 .baseline-summary {
