@@ -99,6 +99,23 @@ class PlanTaskSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
 
+    def validate(self, attrs):
+        baseline_start = attrs.get(
+            'baseline_start_date',
+            getattr(self.instance, 'baseline_start_date', None) if self.instance else None
+        )
+        baseline_end = attrs.get(
+            'baseline_end_date',
+            getattr(self.instance, 'baseline_end_date', None) if self.instance else None
+        )
+
+        if bool(baseline_start) != bool(baseline_end):
+            raise serializers.ValidationError('基线开始日期和基线结束日期必须同时填写或同时清空')
+        if baseline_start and baseline_end and baseline_end < baseline_start:
+            raise serializers.ValidationError('基线结束日期不能早于基线开始日期')
+
+        return attrs
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         deps = instance.successor_dependencies.order_by('sort_order', 'dependency_id')

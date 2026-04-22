@@ -43,6 +43,64 @@
     <!-- 甘特图容器 -->
     <div ref="ganttContainer" class="gantt-container"></div>
 
+    <!-- 任务基线编辑面板 -->
+    <a-drawer
+      v-model:open="baselinePanelVisible"
+      title="任务基线编辑"
+      placement="right"
+      width="420"
+      :mask="false"
+      :destroy-on-close="false"
+      @close="handleBaselinePanelClose"
+    >
+      <template v-if="selectedTaskBaseline.taskId">
+        <div class="baseline-panel-summary">
+          <div class="baseline-panel-title">{{ selectedTaskBaseline.taskName || '未命名任务' }}</div>
+          <div class="baseline-panel-meta">WBS：{{ selectedTaskBaseline.wbsCode || '-' }}</div>
+          <div class="baseline-panel-meta">计划日期：{{ selectedTaskBaseline.planStart || '-' }} ~ {{ selectedTaskBaseline.planEnd || '-' }}</div>
+        </div>
+
+        <a-form layout="vertical">
+          <a-form-item label="基线开始日期">
+            <a-date-picker
+              v-model:value="selectedTaskBaseline.baselineStart"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </a-form-item>
+          <a-form-item label="基线结束日期">
+            <a-date-picker
+              v-model:value="selectedTaskBaseline.baselineEnd"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </a-form-item>
+        </a-form>
+
+        <div class="baseline-panel-actions">
+          <a-space wrap>
+            <a-button size="small" @click="handleSyncSelectedBaselineFromPlan">同步计划日期</a-button>
+            <a-button size="small" danger @click="handleClearSelectedBaseline">清空基线</a-button>
+          </a-space>
+        </div>
+
+        <a-alert
+          class="baseline-panel-tip"
+          type="info"
+          show-icon
+          message="基线开始和结束需同时填写。点击“应用到图表”后会立即刷新任务基线条，并进入待保存列表。"
+        />
+
+        <div class="baseline-panel-footer">
+          <a-space>
+            <a-button @click="handleBaselinePanelClose">关闭</a-button>
+            <a-button type="primary" @click="handleApplyTaskBaseline">应用到图表</a-button>
+          </a-space>
+        </div>
+      </template>
+      <a-empty v-else description="请选择一个任务" />
+    </a-drawer>
+
     <!-- 连线关系编辑弹窗 -->
     <a-modal
       v-model:open="linkModalVisible"
@@ -124,6 +182,16 @@ const zoomLevel = ref('day')
 const pendingChanges = ref(0)
 const saving = ref(false)
 const changedTasks = ref(new Map())
+const baselinePanelVisible = ref(false)
+const selectedTaskBaseline = reactive({
+  taskId: null,
+  taskName: '',
+  wbsCode: '',
+  planStart: '',
+  planEnd: '',
+  baselineStart: null,
+  baselineEnd: null
+})
 let ganttInitialized = false
 let loadingInProgress = false
 let baselineBandEl = null
@@ -135,8 +203,119 @@ let taskBaselineLayerId = null
 const parseDateSafe = (value) => {
   if (!value) return null
   if (value instanceof Date) return new Date(value)
+
+  if (typeof value === 'string') {
+    const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (dateOnlyMatch) {
+      const y = Number(dateOnlyMatch[1])
+      const m = Number(dateOnlyMatch[2])
+      const d = Number(dateOnlyMatch[3])
+      return new Date(y, m - 1, d)
+    }
+  }
+
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? null : d
+}
+
+const formatDateValue = (value) => {
+  const date = parseDateSafe(value)
+  return date ? formatDate(date) : ''
+}
+
+const resetSelectedTaskBaseline = () => {
+  selectedTaskBaseline.taskId = null
+  selectedTaskBaseline.taskName = ''
+  selectedTaskBaseline.wbsCode = ''
+  selectedTaskBaseline.planStart = ''
+  selectedTaskBaseline.planEnd = ''
+  selectedTaskBaseline.baselineStart = null
+  selectedTaskBaseline.baselineEnd = null
+}
+
+const syncSelectedTaskBaseline = (task) => {
+  if (!task) {
+    resetSelectedTaskBaseline()
+    return
+  }
+
+  selectedTaskBaseline.taskId = task.id
+  selectedTaskBaseline.taskName = task.text || ''
+  try {
+    selectedTaskBaseline.wbsCode = gantt.getWBSCode(task)
+  } catch (e) {
+    selectedTaskBaseline.wbsCode = ''
+  }
+  selectedTaskBaseline.planStart = formatDateValue(task.start_date)
+  selectedTaskBaseline.planEnd = formatDateValue(task.end_date)
+  selectedTaskBaseline.baselineStart = formatDateValue(task.baseline_start_date) || null
+  selectedTaskBaseline.baselineEnd = formatDateValue(task.baseline_end_date) || null
+}
+
+const openTaskBaselinePanel = (taskId) => {
+  try {
+    const task = gantt.getTask(taskId)
+    gantt.selectTask(taskId)
+    syncSelectedTaskBaseline(task)
+    baselinePanelVisible.value = true
+  } catch (e) {
+    resetSelectedTaskBaseline()
+  }
+}
+
+const handleBaselinePanelClose = () => {
+  baselinePanelVisible.value = false
+}
+
+const handleSyncSelectedBaselineFromPlan = () => {
+  selectedTaskBaseline.baselineStart = selectedTaskBaseline.planStart || null
+  selectedTaskBaseline.baselineEnd = selectedTaskBaseline.planEnd || null
+}
+
+const handleClearSelectedBaseline = () => {
+  selectedTaskBaseline.baselineStart = null
+  selectedTaskBaseline.baselineEnd = null
+}
+
+const validateSelectedTaskBaseline = () => {
+  const { baselineStart, baselineEnd } = selectedTaskBaseline
+  const hasStart = Boolean(baselineStart)
+  const hasEnd = Boolean(baselineEnd)
+
+  if (hasStart !== hasEnd) {
+    message.warning('基线开始日期和基线结束日期必须同时填写或同时清空')
+    return false
+  }
+
+  if (!hasStart && !hasEnd) return true
+
+  const start = parseDateSafe(baselineStart)
+  const end = parseDateSafe(baselineEnd)
+  if (!start || !end || end < start) {
+    message.warning('基线结束日期不能早于基线开始日期')
+    return false
+  }
+
+  return true
+}
+
+const handleApplyTaskBaseline = () => {
+  if (!selectedTaskBaseline.taskId) return
+  if (!validateSelectedTaskBaseline()) return
+
+  try {
+    const task = gantt.getTask(selectedTaskBaseline.taskId)
+    task.baseline_start_date = selectedTaskBaseline.baselineStart || ''
+    task.baseline_end_date = selectedTaskBaseline.baselineEnd || ''
+    gantt.updateTask(task.id)
+    recordChange(task)
+    syncSelectedTaskBaseline(task)
+    renderProjectBaselineBand()
+    renderTaskBaselines()
+    message.success('任务基线已应用，请点击“保存修改”落库')
+  } catch (e) {
+    message.error('任务基线应用失败，请重试')
+  }
 }
 
 const getProjectBaselineRange = () => {
@@ -198,7 +377,7 @@ const renderProjectBaselineBand = () => {
  */
 const renderTaskBaselines = () => {
   try {
-    if (!ganttInitialized || !props.showTaskBaselines) return
+    if (!ganttInitialized) return
 
     const timeline = gantt.$task_data
     if (!timeline) return
@@ -207,13 +386,13 @@ const renderTaskBaselines = () => {
     const oldBars = timeline.querySelectorAll('.gantt-task-baseline-bar')
     oldBars.forEach(el => el.remove())
 
-    gantt.eachTask(function (task) {
-      if (!task.baseline_start_date || !task.baseline_end_date) return
+    if (!props.showTaskBaselines) return
 
-      const bStart = new Date(task.baseline_start_date)
-      const bEnd = new Date(task.baseline_end_date)
-      if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) return
-      if (bEnd < bStart) return
+    gantt.eachTask(function (task) {
+      const baseline = getTaskBaselineRange(task)
+      if (!baseline) return
+      const bStart = baseline.start
+      const bEnd = baseline.end
 
       // 检查任务是否在可见区域（已展开且未被折叠隐藏）
       if (!gantt.isTaskVisible(task.id)) return
@@ -772,6 +951,17 @@ const initGantt = () => {
       return false
     }
 
+    const hasDescendantPredecessorInIncoming = (incomingLinks, sourceId, targetId) => {
+      const normalizedSourceId = String(sourceId)
+      return incomingLinks.some(link => {
+        if (!link || String(link.target) !== String(targetId)) return false
+        const linkSourceId = String(link.source)
+        if (linkSourceId === normalizedSourceId) return false
+        // 若同一目标同时存在“父任务前置”和“其子孙任务前置”，优先子孙任务，避免父任务汇总链路压制前移
+        return isAncestorTask(normalizedSourceId, linkSourceId)
+      })
+    }
+
     const applyIncomingConstraints = (targetId) => {
       let targetTask
       try {
@@ -788,6 +978,22 @@ const initGantt = () => {
       incomingLinks.forEach(link => {
         // 父任务由子任务汇总得出，父->子依赖属于展示/汇总关系，不应锁死子任务前移。
         if (isAncestorTask(link.source, targetId)) {
+          return
+        }
+
+        // 同一目标已存在该前置任务子孙节点的连线时，忽略父级汇总连线
+        // 典型场景：阶段父任务与末级任务都连到后续阶段，拖动末级任务时应按末级任务优先传播
+        let sourceTaskForSummaryCheck = null
+        try {
+          sourceTaskForSummaryCheck = gantt.getTask(link.source)
+        } catch (e) {
+          sourceTaskForSummaryCheck = null
+        }
+        if (
+          sourceTaskForSummaryCheck &&
+          gantt.hasChild && gantt.hasChild(link.source) &&
+          hasDescendantPredecessorInIncoming(incomingLinks, link.source, targetId)
+        ) {
           return
         }
 
@@ -849,6 +1055,8 @@ const initGantt = () => {
       if (delta !== 0) {
         cascadeChildren(targetTask, originalStart)
       }
+      // 依赖级联导致子任务移动后，同步刷新其父任务汇总区间，并继续触发父任务后续依赖
+      updateParentDates(targetTask)
       return true
     }
 
@@ -872,7 +1080,8 @@ const initGantt = () => {
     * 更新父任务日期范围：使父任务包含所有子任务
     * 并级联调整与父任务有FS关系的后续任务
     */
-   function updateParentDates(task) {
+   function updateParentDates(task, options = {}) {
+     const { cascadeForParentLinks = true } = options
      const parentId = task.parent
      if (!parentId || parentId == 0) return
 
@@ -899,11 +1108,13 @@ const initGantt = () => {
            parent.duration = gantt.calculateDuration(minStart, maxEnd)
            recordChange(parent)
 
-           // 新增：父任务日期变化后，级联调整与它有FS关系的后续任务
-           cascadeByLinks(parentId)
+           // 父任务日期变化后，按需要级联调整父任务后续任务
+           if (cascadeForParentLinks) {
+             cascadeByLinks(parentId)
+           }
 
            // 递归向上
-           updateParentDates(parent)
+           updateParentDates(parent, { cascadeForParentLinks })
          }
        }
      } catch (e) {
@@ -954,6 +1165,10 @@ const initGantt = () => {
   gantt.attachEvent('onAfterTaskUpdate', function (id, task) {
     // 数据加载期间不记录变更也不级联，避免 parse() 触发二次调度
     if (loadingInProgress) return true
+
+    if (baselinePanelVisible.value && String(selectedTaskBaseline.taskId) === String(id)) {
+      syncSelectedTaskBaseline(task)
+    }
 
     recordChange(task)
     
@@ -1072,6 +1287,11 @@ const initGantt = () => {
   })
 
   // 缩放
+  gantt.attachEvent('onTaskClick', function (id, e) {
+    openTaskBaselinePanel(id)
+    return true
+  })
+
   gantt.ext.zoom.init(zoomConfig)
   gantt.ext.zoom.setLevel('day')
 
@@ -1081,10 +1301,12 @@ const initGantt = () => {
 
   // 注册基线渲染（通过 onGanttRender 事件手动绘制，兼容 GPL 版本）
   gantt.attachEvent('onGanttRender', function () {
+    renderProjectBaselineBand()
     renderTaskBaselines()
     return true
   })
   gantt.attachEvent('onDataRender', function () {
+    renderProjectBaselineBand()
     renderTaskBaselines()
     return true
   })
@@ -1135,6 +1357,8 @@ const recordChange = (task, options = {}) => {
     plan_task_id: task.id,
     planned_start_date: startDate,
     planned_end_date: endDate,
+    baseline_start_date: task.baseline_start_date || null,
+    baseline_end_date: task.baseline_end_date || null,
     workload_days: workloadDays,
     sort_order: task.sort_order || 0,
     parent_task_id: normalizedParent,
@@ -1390,10 +1614,54 @@ const handleFitToView = () => {
   }
 }
 
+const syncParentRangesBeforeSave = () => {
+  if (!ganttInitialized) return
+
+  const ids = []
+  gantt.eachTask(function (task) {
+    ids.push(task.id)
+  })
+
+  const calcDepth = (taskId) => {
+    let depth = 0
+    let currentId = taskId
+    const visited = new Set()
+    while (currentId && currentId !== 0 && currentId !== '0') {
+      if (visited.has(String(currentId))) break
+      visited.add(String(currentId))
+      let currentTask
+      try {
+        currentTask = gantt.getTask(currentId)
+      } catch (e) {
+        break
+      }
+      const parentId = currentTask.parent
+      if (!parentId || parentId === 0 || parentId === '0') break
+      depth += 1
+      currentId = parentId
+    }
+    return depth
+  }
+
+  ids
+    .sort((a, b) => calcDepth(b) - calcDepth(a))
+    .forEach(taskId => {
+      try {
+        const task = gantt.getTask(taskId)
+        updateParentDates(task, { cascadeForParentLinks: false })
+      } catch (e) {
+        // skip invalid task
+      }
+    })
+}
+
 // ========================
 // 保存变更
 // ========================
 const handleSaveChanges = async () => {
+  // 保存前兜底：强制按当前子任务区间回写父任务，避免落库后父子不对齐
+  syncParentRangesBeforeSave()
+
   if (changedTasks.value.size === 0) return
 
   saving.value = true
@@ -1419,6 +1687,18 @@ const handleSaveChanges = async () => {
 watch([() => props.tasks, () => props.flatTasks], () => {
   if (ganttInitialized) {
     loadTasks()
+
+    if (baselinePanelVisible.value && selectedTaskBaseline.taskId != null) {
+      nextTick(() => {
+        try {
+          const task = gantt.getTask(selectedTaskBaseline.taskId)
+          syncSelectedTaskBaseline(task)
+        } catch (e) {
+          handleBaselinePanelClose()
+          resetSelectedTaskBaseline()
+        }
+      })
+    }
   }
 }, { deep: true })
 
@@ -1465,6 +1745,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  resetSelectedTaskBaseline()
   // 清理项目基线带
   if (baselineBandEl && baselineBandEl.parentNode) {
     baselineBandEl.parentNode.removeChild(baselineBandEl)
@@ -1525,6 +1806,40 @@ onBeforeUnmount(() => {
   flex: 1;
   width: 100%;
   min-height: 400px;
+}
+
+.baseline-panel-summary {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}
+
+.baseline-panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #262626;
+  margin-bottom: 8px;
+}
+
+.baseline-panel-meta {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #595959;
+}
+
+.baseline-panel-actions {
+  margin-bottom: 16px;
+}
+
+.baseline-panel-tip {
+  margin-bottom: 16px;
+}
+
+.baseline-panel-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* ========================
@@ -1819,5 +2134,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
   z-index: 5;
   opacity: 0.5;
+}
+
+.ant-drawer-content-wrapper {
+  max-width: calc(100vw - 48px);
 }
 </style>

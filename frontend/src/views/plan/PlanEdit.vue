@@ -18,6 +18,14 @@
     <a-tabs v-model:activeKey="activeTab" class="plan-tabs">
       <!-- Tab1: 任务计划 -->
       <a-tab-pane key="tasks" tab="任务计划">
+        <div class="task-toolbar">
+          <a-space>
+            <a-button @click="handleOpenBaselineModal">基线设置</a-button>
+          </a-space>
+          <span class="baseline-summary">
+            已配置基线 {{ baselineConfiguredCount }}/{{ flatTasks.length }}
+          </span>
+        </div>
         <a-table
           :columns="taskColumns"
           :data-source="planTasks"
@@ -229,6 +237,7 @@
             :flat-tasks="flatTasks"
             :project-id="projectId"
             :active="activeTab === 'gantt'"
+            :baseline="projectBaseline"
             :on-save="handleGanttSave"
             @save="handleGanttSave"
           />
@@ -330,6 +339,76 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 基线维护弹窗 -->
+    <a-modal
+      v-model:open="baselineModalVisible"
+      title="手动维护任务基线"
+      width="1100px"
+      ok-text="保存基线"
+      cancel-text="取消"
+      :confirm-loading="baselineSaving"
+      @ok="handleSaveBaselines"
+      @cancel="handleBaselineModalCancel"
+    >
+      <div class="baseline-modal-toolbar">
+        <a-alert
+          type="info"
+          show-icon
+          message="基线开始和基线结束需要同时填写；保存后甘特图会立即按最新基线重新渲染。"
+        />
+        <a-space wrap>
+          <a-button size="small" @click="handleSyncAllBaselinesFromPlan">
+            全部同步为计划日期
+          </a-button>
+          <a-button size="small" danger @click="handleClearAllBaselines">
+            清空全部基线
+          </a-button>
+        </a-space>
+      </div>
+
+      <a-table
+        class="baseline-table"
+        :columns="baselineColumns"
+        :data-source="baselineRows"
+        row-key="plan_task_id"
+        size="small"
+        bordered
+        :pagination="{ pageSize: 8, showSizeChanger: false }"
+        :scroll="{ y: 420 }"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'baseline_start_date'">
+            <a-date-picker
+              v-model:value="record.baseline_start_date"
+              size="small"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </template>
+
+          <template v-else-if="column.key === 'baseline_end_date'">
+            <a-date-picker
+              v-model:value="record.baseline_end_date"
+              size="small"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </template>
+
+          <template v-else-if="column.key === 'action'">
+            <a-space size="small">
+              <a-button type="link" size="small" @click="handleSyncBaselineFromPlan(record)">
+                同步计划
+              </a-button>
+              <a-button type="link" danger size="small" @click="handleClearBaseline(record)">
+                清空
+              </a-button>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
   </div>
 </template>
 
@@ -362,6 +441,9 @@ const resourceLoading = ref(false)
 const selectedTask = ref(null)
 const resourceModalVisible = ref(false)
 const ganttRef = ref(null)
+const baselineModalVisible = ref(false)
+const baselineSaving = ref(false)
+const baselineRows = ref([])
 
 const projectInfo = ref({
   code: '',
@@ -401,6 +483,16 @@ const taskColumns = [
   { title: '操作', key: 'action', width: 200, fixed: 'right' }
 ]
 
+const baselineColumns = [
+  { title: '任务ID', dataIndex: 'plan_task_id', key: 'plan_task_id', width: 90 },
+  { title: '任务名称', dataIndex: 'task_name', key: 'task_name', width: 240 },
+  { title: '计划开始', dataIndex: 'planned_start_date', key: 'planned_start_date', width: 120 },
+  { title: '计划结束', dataIndex: 'planned_end_date', key: 'planned_end_date', width: 120 },
+  { title: '基线开始', dataIndex: 'baseline_start_date', key: 'baseline_start_date', width: 160 },
+  { title: '基线结束', dataIndex: 'baseline_end_date', key: 'baseline_end_date', width: 160 },
+  { title: '快捷操作', key: 'action', width: 140, fixed: 'right' }
+]
+
 // 资源表格列
 const resourceColumns = [
   { title: '资源类型', dataIndex: 'resourceType', key: 'resourceType', width: 100 },
@@ -424,6 +516,48 @@ const taskTreeData = computed(() => {
 
 // 扁平任务列表（供甘特图使用）
 const flatTasks = ref([])
+
+const baselineConfiguredCount = computed(() => {
+  return flatTasks.value.filter(task => task.baseline_start_date && task.baseline_end_date).length
+})
+
+const projectBaseline = computed(() => {
+  let minStart = null
+  let maxEnd = null
+
+  flatTasks.value.forEach(task => {
+    if (!task.baseline_start_date || !task.baseline_end_date) return
+
+    const start = new Date(task.baseline_start_date)
+    const end = new Date(task.baseline_end_date)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return
+
+    if (!minStart || start < minStart) minStart = start
+    if (!maxEnd || end > maxEnd) maxEnd = end
+  })
+
+  if (!minStart || !maxEnd) return null
+
+  return {
+    baseline_start_date: minStart.toISOString().slice(0, 10),
+    baseline_end_date: maxEnd.toISOString().slice(0, 10),
+    label: '项目基线'
+  }
+})
+
+const normalizeDateValue = (value) => value || null
+
+const buildBaselineRows = () => {
+  return flatTasks.value.map((task, index) => ({
+    plan_task_id: task.plan_task_id,
+    task_name: task.task_name || '未命名任务',
+    planned_start_date: normalizeDateValue(task.planned_start_date),
+    planned_end_date: normalizeDateValue(task.planned_end_date),
+    baseline_start_date: normalizeDateValue(task.baseline_start_date),
+    baseline_end_date: normalizeDateValue(task.baseline_end_date),
+    sort_order: task.sort_order ?? index
+  }))
+}
 
 // 从扁平列表构建树结构
 const buildTree = (flatList) => {
@@ -505,6 +639,142 @@ const fetchResources = async (taskId) => {
     message.error('加载资源失败')
   } finally {
     resourceLoading.value = false
+  }
+}
+
+const handleOpenBaselineModal = () => {
+  if (flatTasks.value.length === 0) {
+    message.warning('暂无任务可维护基线')
+    return
+  }
+
+  baselineRows.value = buildBaselineRows()
+  baselineModalVisible.value = true
+}
+
+const handleBaselineModalCancel = () => {
+  baselineModalVisible.value = false
+}
+
+const handleSyncBaselineFromPlan = (record) => {
+  record.baseline_start_date = normalizeDateValue(record.planned_start_date)
+  record.baseline_end_date = normalizeDateValue(record.planned_end_date)
+}
+
+const handleClearBaseline = (record) => {
+  record.baseline_start_date = null
+  record.baseline_end_date = null
+}
+
+const handleSyncAllBaselinesFromPlan = () => {
+  baselineRows.value.forEach(handleSyncBaselineFromPlan)
+}
+
+const handleClearAllBaselines = () => {
+  baselineRows.value.forEach(handleClearBaseline)
+}
+
+const validateBaselineRows = (rows) => {
+  for (const row of rows) {
+    const hasStart = Boolean(row.baseline_start_date)
+    const hasEnd = Boolean(row.baseline_end_date)
+
+    if (hasStart !== hasEnd) {
+      message.warning(`任务“${row.task_name}”的基线开始和基线结束必须同时填写`)
+      return false
+    }
+
+    if (hasStart && hasEnd) {
+      const start = new Date(row.baseline_start_date)
+      const end = new Date(row.baseline_end_date)
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+        message.warning(`任务“${row.task_name}”的基线日期范围无效`)
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
+const collectChangedBaselineTasks = () => {
+  const originalMap = new Map(flatTasks.value.map(task => [Number(task.plan_task_id), task]))
+
+  return baselineRows.value
+    .filter(row => {
+      const original = originalMap.get(Number(row.plan_task_id))
+      if (!original) return false
+
+      const originalStart = normalizeDateValue(original.baseline_start_date)
+      const originalEnd = normalizeDateValue(original.baseline_end_date)
+      return originalStart !== normalizeDateValue(row.baseline_start_date) ||
+        originalEnd !== normalizeDateValue(row.baseline_end_date)
+    })
+    .map(row => ({
+      plan_task_id: row.plan_task_id,
+      baseline_start_date: normalizeDateValue(row.baseline_start_date),
+      baseline_end_date: normalizeDateValue(row.baseline_end_date)
+    }))
+}
+
+const persistTaskUpdates = async (tasks, fields) => {
+  const normalizedTasks = (tasks || []).map(task => ({
+    ...task,
+    plan_task_id: task.plan_task_id || task.id
+  }))
+
+  if (normalizedTasks.length === 0) return
+
+  const batchRes = await batchUpdatePlanTasks({ tasks: normalizedTasks })
+  const batchData = batchRes?.data && typeof batchRes.data === 'object' ? batchRes.data : batchRes
+  const updated = Array.isArray(batchData?.updated) ? batchData.updated : []
+  const errors = Array.isArray(batchData?.errors) ? batchData.errors : []
+
+  if (updated.length > 0 && errors.length === 0) return
+
+  const failedIdSet = new Set((errors || []).map(item => Number(item?.plan_task_id)).filter(Boolean))
+  const fallbackTargets = failedIdSet.size > 0
+    ? normalizedTasks.filter(task => failedIdSet.has(Number(task.plan_task_id)))
+    : normalizedTasks
+
+  const patchJobs = fallbackTargets.map(task => {
+    const payload = {}
+    fields.forEach(key => {
+      if (Object.prototype.hasOwnProperty.call(task, key)) payload[key] = task[key]
+    })
+    if (!Object.prototype.hasOwnProperty.call(payload, 'parent_task_id')) {
+      payload.parent_task_id = task.parent_task_id ?? task.parent_task ?? null
+    }
+    return partialUpdatePlanTask(task.plan_task_id, payload)
+  })
+
+  const patchResults = await Promise.allSettled(patchJobs)
+  const failed = patchResults.filter(item => item.status === 'rejected')
+  if (failed.length > 0) {
+    throw new Error(`仍有 ${failed.length} 条任务保存失败`)
+  }
+}
+
+const handleSaveBaselines = async () => {
+  if (!validateBaselineRows(baselineRows.value)) return
+
+  const changedTasks = collectChangedBaselineTasks()
+  if (changedTasks.length === 0) {
+    baselineModalVisible.value = false
+    message.info('基线未发生变化')
+    return
+  }
+
+  baselineSaving.value = true
+  try {
+    await persistTaskUpdates(changedTasks, ['baseline_start_date', 'baseline_end_date'])
+    await fetchTasks()
+    baselineModalVisible.value = false
+    message.success(`已保存 ${changedTasks.length} 条任务基线`)
+  } catch (error) {
+    message.error('基线保存失败，请重试')
+  } finally {
+    baselineSaving.value = false
   }
 }
 
@@ -729,46 +999,12 @@ const handleTbqImport = () => {
 // 甘特图保存
 const handleGanttSave = async (tasks) => {
   try {
-    const normalizedTasks = (tasks || []).map(task => ({
-      ...task,
-      plan_task_id: task.plan_task_id || task.id
-    }))
-
-    const batchRes = await batchUpdatePlanTasks({ tasks: normalizedTasks })
-    const batchData = batchRes?.data && typeof batchRes.data === 'object' ? batchRes.data : batchRes
-    const updated = Array.isArray(batchData?.updated) ? batchData.updated : []
-    const errors = Array.isArray(batchData?.errors) ? batchData.errors : []
-
-    // 批量接口出现“0更新”或部分失败时，回退到逐条 PATCH，保证尽量落库
-    if (normalizedTasks.length > 0 && (updated.length === 0 || errors.length > 0)) {
-      const fields = [
-        'planned_start_date', 'planned_end_date', 'workload_days',
-        'sort_order', 'parent_task_id', 'phase', 'progress_percent',
-        'task_name', 'pre_task_code', 'logic_relation', 'dependencies', 'task_level'
-      ]
-      const failedIdSet = new Set((errors || []).map(item => Number(item?.plan_task_id)).filter(Boolean))
-      const fallbackTargets = failedIdSet.size > 0
-        ? normalizedTasks.filter(task => failedIdSet.has(Number(task.plan_task_id)))
-        : normalizedTasks
-
-      const patchJobs = fallbackTargets.map(task => {
-        const payload = {}
-        fields.forEach(key => {
-          if (Object.prototype.hasOwnProperty.call(task, key)) payload[key] = task[key]
-        })
-        // 确保 parent_task_id 始终包含（可能为 null 表示根任务）
-        if (!Object.prototype.hasOwnProperty.call(payload, 'parent_task_id')) {
-          payload.parent_task_id = task.parent_task_id ?? task.parent_task ?? null
-        }
-        return partialUpdatePlanTask(task.plan_task_id, payload)
-      })
-
-      const patchResults = await Promise.allSettled(patchJobs)
-      const failed = patchResults.filter(item => item.status === 'rejected')
-      if (failed.length > 0) {
-        throw new Error(`仍有 ${failed.length} 条任务保存失败`)
-      }
-    }
+    await persistTaskUpdates(tasks, [
+      'planned_start_date', 'planned_end_date', 'workload_days',
+      'sort_order', 'parent_task_id', 'phase', 'progress_percent',
+      'task_name', 'pre_task_code', 'logic_relation', 'dependencies', 'task_level',
+      'baseline_start_date', 'baseline_end_date'
+    ])
 
     await fetchTasks() // 重新加载数据
     message.success('甘特图修改已同步到数据库')
@@ -841,8 +1077,31 @@ onMounted(fetchTasks)
   margin-top: 16px;
 }
 
+.task-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.baseline-summary {
+  color: #595959;
+  font-size: 13px;
+}
+
 .gantt-tab-content {
   height: calc(100vh - 280px);
   min-height: 500px;
+}
+
+.baseline-modal-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+:deep(.baseline-table .ant-picker) {
+  width: 100%;
 }
 </style>

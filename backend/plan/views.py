@@ -58,7 +58,8 @@ class PlanTaskViewSet(viewsets.ModelViewSet):
                 allowed_fields = [
                     'planned_start_date', 'planned_end_date', 'workload_days',
                     'sort_order', 'parent_task_id', 'phase', 'progress_percent',
-                    'task_name', 'pre_task_code', 'logic_relation', 'task_level'
+                    'task_name', 'pre_task_code', 'logic_relation', 'task_level',
+                    'baseline_start_date', 'baseline_end_date'
                 ]
                 for field in allowed_fields:
                     if field not in task_data:
@@ -69,6 +70,12 @@ class PlanTaskViewSet(viewsets.ModelViewSet):
                         if value in (0, '0', '', None):
                             value = None
                     setattr(task, field, value)
+
+                if bool(task.baseline_start_date) != bool(task.baseline_end_date):
+                    raise ValueError('基线开始日期和基线结束日期必须同时填写或同时清空')
+                if task.baseline_start_date and task.baseline_end_date and task.baseline_end_date < task.baseline_start_date:
+                    raise ValueError('基线结束日期不能早于基线开始日期')
+
                 task.save()
 
                 # 新协议：每个任务可提交多条前置依赖
