@@ -192,10 +192,90 @@ const selectedTaskBaseline = reactive({
   baselineStart: null,
   baselineEnd: null
 })
+const lastEditedTaskId = ref(null)
 let ganttInitialized = false
 let loadingInProgress = false
 let baselineBandEl = null
 let taskBaselineLayerId = null
+let isRestoringScroll = false
+
+const getLastFocusStorageKey = () => `plan-gantt-last-focus:${String(props.projectId)}`
+const getScrollStorageKey = () => `plan-gantt-scroll-x:${String(props.projectId)}`
+
+const persistLastFocusedTask = (taskId) => {
+  if (taskId == null) return
+  try {
+    window.localStorage.setItem(getLastFocusStorageKey(), String(taskId))
+  } catch (e) {
+    // localStorage 不可用时静默忽略
+  }
+}
+
+const readLastFocusedTask = () => {
+  try {
+    return window.localStorage.getItem(getLastFocusStorageKey())
+  } catch (e) {
+    return null
+  }
+}
+
+const clearLastFocusedTask = () => {
+  try {
+    window.localStorage.removeItem(getLastFocusStorageKey())
+  } catch (e) {
+    // ignore
+  }
+}
+
+const persistTimelineScrollX = (value) => {
+  const x = Number(value)
+  if (!Number.isFinite(x)) return
+  try {
+    window.localStorage.setItem(getScrollStorageKey(), String(Math.max(0, Math.round(x))))
+  } catch (e) {
+    // localStorage 不可用时静默忽略
+  }
+}
+
+const readTimelineScrollX = () => {
+  try {
+    const raw = window.localStorage.getItem(getScrollStorageKey())
+    const x = Number(raw)
+    return Number.isFinite(x) && x >= 0 ? x : null
+  } catch (e) {
+    return null
+  }
+}
+
+const restoreTimelineScrollX = (xValue = null) => {
+  const parsedX = xValue == null ? null : Number(xValue)
+  const savedX = Number.isFinite(parsedX) && parsedX >= 0 ? parsedX : readTimelineScrollX()
+  if (savedX == null || !ganttInitialized) return
+  isRestoringScroll = true
+  try {
+    const state = gantt.getScrollState ? gantt.getScrollState() : { y: 0 }
+    gantt.scrollTo(savedX, state.y || 0)
+  } catch (e) {
+    // ignore
+  } finally {
+    setTimeout(() => {
+      isRestoringScroll = false
+    }, 0)
+  }
+}
+
+const focusTaskInView = (taskId) => {
+  if (!taskId || !ganttInitialized) return
+  try {
+    const task = gantt.getTask(taskId)
+    if (!task) return
+    gantt.showTask(taskId)
+    gantt.selectTask(taskId)
+  } catch (e) {
+    // 任务不存在则清理无效缓存，避免每次重复报错
+    clearLastFocusedTask()
+  }
+}
 
 // ========================
 // 基线辅助函数
@@ -1299,6 +1379,12 @@ const initGantt = () => {
     return true
   })
 
+  gantt.attachEvent('onGanttScroll', function (left, top) {
+    if (loadingInProgress || isRestoringScroll) return true
+    persistTimelineScrollX(left)
+    return true
+  })
+
   gantt.ext.zoom.init(zoomConfig)
   gantt.ext.zoom.setLevel('day')
 
@@ -1377,6 +1463,7 @@ const recordChange = (task, options = {}) => {
     dependencies: dependencies,
     task_level: task.task_level || 1
   })
+  lastEditedTaskId.value = task.id
   pendingChanges.value = changedTasks.value.size
 }
 
@@ -1393,6 +1480,7 @@ const formatDate = (date) => {
 const loadTasks = () => {
   if (!ganttInitialized) return
   loadingInProgress = true
+  const savedScrollX = readTimelineScrollX()
   try {
     gantt.clearAll()
 
@@ -1422,6 +1510,19 @@ const loadTasks = () => {
       task.$open = true
     })
     gantt.render()
+
+    const targetFocusId = lastEditedTaskId.value != null
+      ? String(lastEditedTaskId.value)
+      : readLastFocusedTask()
+    nextTick(() => {
+      if (targetFocusId) {
+        focusTaskInView(targetFocusId)
+      }
+      // showTask 可能改写横向滚动，最后再恢复一次用户的时间轴位置
+      restoreTimelineScrollX(savedScrollX)
+      // 某些渲染阶段会在下一帧再次改写 scroll，做一次延迟兜底恢复
+      setTimeout(() => restoreTimelineScrollX(savedScrollX), 80)
+    })
   } finally {
     loadingInProgress = false
   }
@@ -1669,6 +1770,13 @@ const handleSaveChanges = async () => {
   // 保存前兜底：强制按当前子任务区间回写父任务，避免落库后父子不对齐
   syncParentRangesBeforeSave()
 
+  try {
+    const scrollState = gantt.getScrollState ? gantt.getScrollState() : null
+    persistTimelineScrollX(scrollState?.x)
+  } catch (e) {
+    // ignore
+  }
+
   if (changedTasks.value.size === 0) return
 
   saving.value = true
@@ -1679,6 +1787,13 @@ const handleSaveChanges = async () => {
     } else {
       // 向后兼容旧事件方式（不保证可等待父组件异步结果）
       emit('save', tasks)
+    }
+    persistLastFocusedTask(lastEditedTaskId.value)
+    try {
+      const scrollState = gantt.getScrollState ? gantt.getScrollState() : null
+      persistTimelineScrollX(scrollState?.x)
+    } catch (e) {
+      // ignore
     }
     changedTasks.value.clear()
     pendingChanges.value = 0
@@ -1752,6 +1867,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  try {
+    const scrollState = gantt.getScrollState ? gantt.getScrollState() : null
+    persistTimelineScrollX(scrollState?.x)
+  } catch (e) {
+    // ignore
+  }
   resetSelectedTaskBaseline()
   // 清理项目基线带
   if (baselineBandEl && baselineBandEl.parentNode) {
