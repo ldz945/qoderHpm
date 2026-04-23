@@ -8,10 +8,11 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.utils import IntegrityError
-from .models import PlanTask, ResourcePlan, ResourceReserve, PlanVersion
+from .models import PlanTask, PlanTaskCategory, ResourcePlan, ResourceReserve, PlanVersion
 from .serializers import (
     PlanTaskSerializer, 
     PlanTaskTreeSerializer,
+    PlanTaskCategorySerializer,
     sync_task_dependencies,
     ResourcePlanSerializer,
     ResourceReserveSerializer, 
@@ -107,6 +108,16 @@ class PlanTaskViewSet(viewsets.ModelViewSet):
         })
 
 
+class PlanTaskCategoryViewSet(viewsets.ModelViewSet):
+    """计划任务类别字典视图集"""
+    queryset = PlanTaskCategory.objects.all()
+    serializer_class = PlanTaskCategorySerializer
+    filterset_fields = ['category_type', 'enabled']
+    search_fields = ['category_value']
+    ordering_fields = ['category_type', 'sort_order', 'category_value', 'created_at']
+    ordering = ['category_type', 'sort_order', 'category_id']
+
+
 class ResourcePlanViewSet(viewsets.ModelViewSet):
     """资源计划视图集"""
     queryset = ResourcePlan.objects.all()
@@ -157,4 +168,3 @@ class PlanVersionViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status.upper())
 
         return queryset
-

@@ -7,6 +7,7 @@ from . import views
 
 router = DefaultRouter()
 router.register('plan-tasks', views.PlanTaskViewSet)
+router.register('task-categories', views.PlanTaskCategoryViewSet)
 router.register('resource-plans', views.ResourcePlanViewSet)
 router.register('resource-reserves', views.ResourceReserveViewSet)
 router.register('plan-versions', views.PlanVersionViewSet)

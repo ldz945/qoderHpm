@@ -36,7 +36,8 @@
             <DatabaseOutlined />
           </template>
           <template #title>主数据管理</template>
-          <a-menu-item key="master-data-employees">员工管理</a-menu-item>
+          <a-menu-item key="master-data-employees">人员维护</a-menu-item>
+          <a-menu-item key="master-data-departments">部门维护</a-menu-item>
           <a-menu-item key="master-data-resources">资源管理</a-menu-item>
           <a-menu-item key="master-data-prices">价格管理</a-menu-item>
         </a-sub-menu>
@@ -164,6 +165,7 @@ const selectedKeys = computed(() => {
   const keyMap = {
     '/dashboard': 'dashboard',
     '/master-data/employees': 'master-data-employees',
+    '/master-data/departments': 'master-data-departments',
     '/master-data/resources': 'master-data-resources',
     '/master-data/prices': 'master-data-prices',
     '/project/list': 'project-list',
@@ -238,6 +240,7 @@ const handleMenuClick = ({ key }) => {
   const routeMap = {
     'dashboard': '/dashboard',
     'master-data-employees': '/master-data/employees',
+    'master-data-departments': '/master-data/departments',
     'master-data-resources': '/master-data/resources',
     'master-data-prices': '/master-data/prices',
     'project-list': '/project/list',

@@ -4,7 +4,7 @@
 """
 
 from rest_framework import serializers
-from .models import PlanTask, PlanTaskDependency, ResourcePlan, ResourceReserve, PlanVersion
+from .models import PlanTask, PlanTaskDependency, PlanTaskCategory, ResourcePlan, ResourceReserve, PlanVersion
 
 
 def _build_legacy_dependency_fields(task):
@@ -213,6 +213,21 @@ class PlanTaskTreeSerializer(serializers.ModelSerializer):
             }
             for dep in deps
         ]
+
+
+class PlanTaskCategorySerializer(serializers.ModelSerializer):
+    """计划任务类别序列化器"""
+
+    class Meta:
+        model = PlanTaskCategory
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+    def validate_category_value(self, value):
+        normalized = (value or '').strip()
+        if not normalized:
+            raise serializers.ValidationError('类别值不能为空')
+        return normalized
 
 
 class ResourcePlanSerializer(serializers.ModelSerializer):

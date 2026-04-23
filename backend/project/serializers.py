@@ -18,14 +18,51 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 class ProjectListSerializer(serializers.ModelSerializer):
     """项目列表序列化器（简化字段）"""
-    
+    overallProgress = serializers.SerializerMethodField()
+    actualAmount = serializers.SerializerMethodField()
+
     class Meta:
         model = Project
         fields = [
             'project_id', 'project_code', 'project_name', 'version',
             'project_type', 'status', 'pm', 'am', 'contract_amount',
-            'health_status', 'created_at'
+            'health_status', 'created_at', 'overallProgress', 'actualAmount'
         ]
+
+    def get_overallProgress(self, obj):
+        tasks_manager = getattr(obj, 'plan_tasks', None)
+        if tasks_manager is None:
+            return 0
+        tasks = list(tasks_manager.all())
+        if not tasks:
+            return 0
+
+        weighted_sum = 0.0
+        total_weight = 0.0
+        plain_sum = 0.0
+        plain_count = 0
+
+        for task in tasks:
+            progress = float(task.progress_percent or 0)
+            progress = max(0.0, min(100.0, progress))
+            workload = float(task.workload_days or 0)
+
+            plain_sum += progress
+            plain_count += 1
+
+            if workload > 0:
+                weighted_sum += progress * workload
+                total_weight += workload
+
+        if total_weight > 0:
+            return round(weighted_sum / total_weight, 2)
+        if plain_count > 0:
+            return round(plain_sum / plain_count, 2)
+        return 0
+
+    def get_actualAmount(self, obj):
+        # 当前模型未维护项目实际金额，先返回 0，避免前端显示为空
+        return 0
 
 
 class ProjectTaskSerializer(serializers.ModelSerializer):

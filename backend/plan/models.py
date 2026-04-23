@@ -178,6 +178,33 @@ class PlanTaskDependency(models.Model):
         return f'{self.predecessor_task_id}->{self.successor_task_id} ({self.logic_relation})'
 
 
+class PlanTaskCategory(models.Model):
+    """计划任务类别字典（部门/负责人）"""
+
+    CATEGORY_TYPE_CHOICES = [
+        ('DEPARTMENT', '部门'),
+        ('OWNER', '负责人'),
+    ]
+
+    category_id = models.AutoField(primary_key=True, verbose_name='类别ID')
+    category_type = models.CharField(max_length=20, choices=CATEGORY_TYPE_CHOICES, verbose_name='类别类型')
+    category_value = models.CharField(max_length=100, verbose_name='类别值')
+    enabled = models.CharField(max_length=1, default='Y', verbose_name='是否启用')
+    sort_order = models.IntegerField(default=0, verbose_name='排序序号')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'hpm_plan_task_category'
+        verbose_name = '计划任务类别'
+        verbose_name_plural = '计划任务类别'
+        ordering = ['category_type', 'sort_order', 'category_id']
+        unique_together = [['category_type', 'category_value']]
+
+    def __str__(self):
+        return f'{self.category_type}:{self.category_value}'
+
+
 class ResourcePlan(models.Model):
     """资源计划"""
 

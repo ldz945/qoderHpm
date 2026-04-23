@@ -25,6 +25,12 @@ export const createResourceReserve = (data) => request.post('/plans/resource-res
 export const updateResourceReserve = (id, data) => request.put(`/plans/resource-reserves/${id}/`, data)
 export const deleteResourceReserve = (id) => request.delete(`/plans/resource-reserves/${id}/`)
 
+// ===== 任务类别（部门/负责人） =====
+export const getTaskCategories = (params) => request.get('/plans/task-categories/', { params })
+export const createTaskCategory = (data) => request.post('/plans/task-categories/', data)
+export const updateTaskCategory = (id, data) => request.patch(`/plans/task-categories/${id}/`, data)
+export const deleteTaskCategory = (id) => request.delete(`/plans/task-categories/${id}/`)
+
 // ===== 任务批量更新（甘特图用） =====
 export const batchUpdatePlanTasks = (data) => request.post('/plans/plan-tasks/batch-update/', data)
 

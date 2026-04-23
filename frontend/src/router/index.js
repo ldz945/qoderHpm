@@ -9,12 +9,17 @@ const routes = [
     children: [
       { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/Index.vue'), meta: { title: '看板' } },
       // 主数据
-      { path: 'master-data/employees', name: 'EmployeeList', component: () => import('@/views/masterData/EmployeeList.vue'), meta: { title: '员工管理' } },
+      { path: 'master-data/employees', name: 'EmployeeList', component: () => import('@/views/masterData/EmployeeList.vue'), meta: { title: '人员维护' } },
+      { path: 'master-data/departments', name: 'DepartmentList', component: () => import('@/views/masterData/DepartmentList.vue'), meta: { title: '部门维护' } },
       { path: 'master-data/resources', name: 'ResourceList', component: () => import('@/views/masterData/ResourceList.vue'), meta: { title: '资源管理' } },
       { path: 'master-data/prices', name: 'PriceList', component: () => import('@/views/masterData/PriceList.vue'), meta: { title: '价格管理' } },
       // 项目
       { path: 'project/list', name: 'ProjectList', component: () => import('@/views/project/ProjectList.vue'), meta: { title: '项目立项' } },
+      { path: 'project/create', name: 'ProjectCreate', component: () => import('@/views/project/ProjectCreate.vue'), meta: { title: '新增项目' } },
       { path: 'project/detail/:id', name: 'ProjectDetail', component: () => import('@/views/project/ProjectDetail.vue'), meta: { title: '项目详情' } },
+      // 历史路径兼容
+      { path: 'projects/create', redirect: '/project/create' },
+      { path: 'projects/:id', redirect: to => `/project/detail/${to.params.id}` },
       // 计划
       { path: 'plan/list', name: 'PlanList', component: () => import('@/views/plan/PlanList.vue'), meta: { title: '项目计划' } },
       { path: 'plan/edit/:id', name: 'PlanEdit', component: () => import('@/views/plan/PlanEdit.vue'), meta: { title: '计划编辑' } },

@@ -213,7 +213,10 @@ const getHealthColor = (health) => healthStatusMap[health]?.color || 'default'
 const fetchProjectDetail = async () => {
   try {
     const res = await getProject(projectId)
-    Object.assign(projectData, res)
+    Object.assign(projectData, {
+      ...res,
+      project_manager: res.project_manager || res.pm || ''
+    })
   } catch (error) {
     message.error('获取项目详情失败')
   }

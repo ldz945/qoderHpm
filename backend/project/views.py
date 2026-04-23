@@ -17,7 +17,7 @@ from .serializers import (
 
 class ProjectViewSet(viewsets.ModelViewSet):
     """项目视图集"""
-    queryset = Project.objects.all()
+    queryset = Project.objects.prefetch_related('plan_tasks').all()
     filterset_fields = [
         'project_code', 'project_type', 'status', 'pm', 
         'project_level', 'am', 'health_status'

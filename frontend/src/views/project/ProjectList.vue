@@ -27,7 +27,7 @@
           </a-select>
         </a-form-item>
         <a-form-item label="项目经理">
-          <a-input v-model:value="searchForm.project_manager" placeholder="请输入项目经理" allow-clear />
+          <a-input v-model:value="searchForm.pm" placeholder="请输入项目经理" allow-clear />
         </a-form-item>
         <a-form-item>
           <a-button type="primary" @click="handleSearch">
@@ -58,9 +58,19 @@
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'status'">
-          <a-tag :color="getStatusColor(record.status)">
-            {{ getStatusText(record.status) }}
-          </a-tag>
+          <a-select
+            :value="record.status"
+            size="small"
+            style="width: 110px"
+            :loading="Boolean(statusUpdatingMap[record.project_id])"
+            @change="(value) => handleStatusChange(record, value)"
+          >
+            <a-select-option value="DRAFT">草稿</a-select-option>
+            <a-select-option value="ONGOING">进行中</a-select-option>
+            <a-select-option value="HOLD">暂停</a-select-option>
+            <a-select-option value="CLOSURE">已关闭</a-select-option>
+            <a-select-option value="CANCEL">已取消</a-select-option>
+          </a-select>
         </template>
         <template v-if="column.key === 'health_status'">
           <a-badge :color="getHealthColor(record.health_status)" :text="getHealthText(record.health_status)" />
@@ -85,7 +95,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { SearchOutlined, ReloadOutlined, PlusOutlined, EyeOutlined } from '@ant-design/icons-vue'
-import { getProjects } from '@/api/project'
+import { getProjects, partialUpdateProject } from '@/api/project'
 
 const router = useRouter()
 const loading = ref(false)
@@ -104,7 +114,7 @@ const searchForm = reactive({
   project_name: '',
   project_type: undefined,
   status: undefined,
-  project_manager: ''
+  pm: ''
 })
 
 const statusMap = {
@@ -135,12 +145,14 @@ const columns = [
   { title: '合同金额', dataIndex: 'contract_amount', key: 'contract_amount', width: 150 },
   { title: '币种', dataIndex: 'currency', key: 'currency', width: 80 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
-  { title: '项目经理', dataIndex: 'project_manager', key: 'project_manager', width: 120 },
+  { title: '项目经理', dataIndex: 'pm', key: 'pm', width: 120 },
   { title: '客户名称', dataIndex: 'customer_name', key: 'customer_name', width: 150 },
   { title: '项目等级', dataIndex: 'project_level', key: 'project_level', width: 100 },
   { title: '健康状态', dataIndex: 'health_status', key: 'health_status', width: 100 },
   { title: '操作', key: 'action', fixed: 'right', width: 120 }
 ]
+
+const statusUpdatingMap = reactive({})
 
 const fetchData = async () => {
   loading.value = true
@@ -176,17 +188,35 @@ const handleReset = () => {
     project_name: '',
     project_type: undefined,
     status: undefined,
-    project_manager: ''
+    pm: ''
   })
   handleSearch()
 }
 
 const handleAdd = () => {
-  router.push('/projects/create')
+  router.push('/project/create')
 }
 
 const handleView = (record) => {
-  router.push(`/projects/${record.project_id}`)
+  router.push(`/project/detail/${record.project_id}`)
+}
+
+const handleStatusChange = async (record, nextStatus) => {
+  if (!record || !record.project_id) return
+  const previousStatus = record.status
+  if (previousStatus === nextStatus) return
+
+  statusUpdatingMap[record.project_id] = true
+  record.status = nextStatus
+  try {
+    await partialUpdateProject(record.project_id, { status: nextStatus })
+    message.success('项目状态已更新')
+  } catch (error) {
+    record.status = previousStatus
+    message.error('状态更新失败')
+  } finally {
+    statusUpdatingMap[record.project_id] = false
+  }
 }
 
 onMounted(fetchData)

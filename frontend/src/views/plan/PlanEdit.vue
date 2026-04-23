@@ -71,22 +71,32 @@
 
             <!-- 部门 -->
             <template v-if="column.key === 'department'">
-              <a-input
+              <a-select
                 v-if="record.editing"
                 v-model:value="record.department"
                 size="small"
+                show-search
+                allow-clear
+                :options="departmentSelectOptions"
+                :filter-option="filterSelectOption"
+                placeholder="请选择部门"
               />
-              <span v-else>{{ record.department }}</span>
+              <span v-else>{{ record.department || '-' }}</span>
             </template>
 
             <!-- 任务负责人 -->
             <template v-if="column.key === 'owner'">
-              <a-input
+              <a-select
                 v-if="record.editing"
                 v-model:value="record.owner"
                 size="small"
+                show-search
+                allow-clear
+                :options="ownerSelectOptions"
+                :filter-option="filterSelectOption"
+                placeholder="请选择负责人"
               />
-              <span v-else>{{ record.owner }}</span>
+              <span v-else>{{ record.owner || '-' }}</span>
             </template>
 
             <!-- 被授权人 -->
@@ -413,6 +423,7 @@
         </template>
       </a-table>
     </a-modal>
+
   </div>
 </template>
 
@@ -428,8 +439,10 @@ import {
   getResourcePlans,
   createResourcePlan,
   deleteResourcePlan,
-  batchUpdatePlanTasks
+  batchUpdatePlanTasks,
+  getTaskCategories
 } from '@/api/plan'
+import { getEmployees } from '@/api/masterData'
 import GanttChart from './components/GanttChart.vue'
 
 const route = useRoute()
@@ -462,18 +475,26 @@ const defaultPhaseOptions = [
 ]
 const customPhaseOptions = ref([])
 
-const resourceForm = reactive({
-  resourceType: undefined,
-  resourceCode: '',
-  resourceName: '',
-  quantity: 1,
-  dailyHours: 8,
-  price: 0,
-  unit: '',
-  startDate: null,
-  endDate: null,
-  weekend: false
+const departmentCategories = ref([])
+const ownerPersonnel = ref([])
+
+const departmentSelectOptions = computed(() => {
+  return departmentCategories.value
+    .filter(item => item.enabled === 'Y')
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+    .map(item => ({ value: item.category_value, label: item.category_value }))
 })
+
+const ownerSelectOptions = computed(() => {
+  return ownerPersonnel.value
+    .map(item => ({ value: item.employee_name, label: `${item.employee_name} (${item.employee_code})` }))
+})
+
+const filterSelectOption = (input, option) => {
+  const keyword = String(input || '').trim().toLowerCase()
+  const label = String(option?.label ?? option?.value ?? '').toLowerCase()
+  return label.includes(keyword)
+}
 
 // 任务表格列
 const taskColumns = [
@@ -838,6 +859,24 @@ const fetchResources = async (taskId) => {
     message.error('加载资源失败')
   } finally {
     resourceLoading.value = false
+  }
+}
+
+const fetchTaskCategories = async () => {
+  try {
+    const depRes = await getTaskCategories({ category_type: 'DEPARTMENT', page_size: 500, ordering: 'sort_order,category_id' })
+    departmentCategories.value = depRes.results || depRes.data?.list || depRes.data || []
+  } catch (error) {
+    message.error('加载部门数据失败')
+  }
+}
+
+const fetchOwnerPersonnel = async () => {
+  try {
+    const res = await getEmployees({ page_size: 1000 })
+    ownerPersonnel.value = res.results || res.data?.list || res.data || []
+  } catch (error) {
+    message.error('加载人员数据失败')
   }
 }
 
@@ -1275,7 +1314,9 @@ const getResourceTypeText = (type) => {
   return textMap[type] || type
 }
 
-onMounted(fetchTasks)
+onMounted(async () => {
+  await Promise.all([fetchTasks(), fetchTaskCategories(), fetchOwnerPersonnel()])
+})
 </script>
 
 <style scoped>
@@ -1342,4 +1383,5 @@ onMounted(fetchTasks)
 :deep(.baseline-table .ant-picker) {
   width: 100%;
 }
+
 </style>

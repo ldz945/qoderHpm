@@ -70,9 +70,21 @@
             </span>
           </template>
           <template v-if="column.key === 'status'">
-            <a-tag :color="getStatusColor(record.status)">
-              {{ getStatusText(record.status) }}
-            </a-tag>
+            <div @click.stop>
+              <a-select
+                :value="record.status"
+                size="small"
+                style="width: 100px"
+                :loading="Boolean(statusUpdatingMap[record.project_id])"
+                @change="(value) => handleStatusChange(record, value)"
+              >
+                <a-select-option value="DRAFT">草稿</a-select-option>
+                <a-select-option value="ONGOING">进行中</a-select-option>
+                <a-select-option value="HOLD">暂停</a-select-option>
+                <a-select-option value="CLOSURE">已关闭</a-select-option>
+                <a-select-option value="CANCEL">已取消</a-select-option>
+              </a-select>
+            </div>
           </template>
         </template>
       </a-table>
@@ -85,7 +97,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
-import { getExecutionList } from '@/api/project'
+import { getExecutionList, partialUpdateProject } from '@/api/project'
 
 const router = useRouter()
 
@@ -195,6 +207,8 @@ const getStatusText = (status) => {
   return textMap[status] || status
 }
 
+const statusUpdatingMap = reactive({})
+
 // 加载数据
 const fetchData = async () => {
   loading.value = true
@@ -238,6 +252,24 @@ const handleTableChange = (pag) => {
 // 行点击
 const handleRowClick = (record) => {
   router.push(`/execution/detail/${record.project_id}`)
+}
+
+const handleStatusChange = async (record, nextStatus) => {
+  if (!record || !record.project_id) return
+  const previousStatus = record.status
+  if (previousStatus === nextStatus) return
+
+  statusUpdatingMap[record.project_id] = true
+  record.status = nextStatus
+  try {
+    await partialUpdateProject(record.project_id, { status: nextStatus })
+    message.success('项目状态已更新')
+  } catch (error) {
+    record.status = previousStatus
+    message.error('状态更新失败')
+  } finally {
+    statusUpdatingMap[record.project_id] = false
+  }
 }
 
 onMounted(fetchData)

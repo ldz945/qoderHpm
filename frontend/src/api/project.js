@@ -6,6 +6,7 @@ export const getProjectList = getProjects  // 别名，供组件引用
 export const getProject = (id) => request.get(`/projects/projects/${id}/`)
 export const createProject = (data) => request.post('/projects/projects/', data)
 export const updateProject = (id, data) => request.put(`/projects/projects/${id}/`, data)
+export const partialUpdateProject = (id, data) => request.patch(`/projects/projects/${id}/`, data)
 export const deleteProject = (id) => request.delete(`/projects/projects/${id}/`)
 
 // ===== 项目任务 =====
