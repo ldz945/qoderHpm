@@ -2042,8 +2042,8 @@ onBeforeUnmount(() => {
 /* 进度条 */
 .gantt_task_progress {
   border-radius: 4px !important;
-  opacity: 0.3 !important;
-  background: rgba(255, 255, 255, 0.4) !important;
+  opacity: 1 !important;
+  background: rgba(0, 0, 0, 0.25) !important;
 }
 
 .gantt-progress-text {
