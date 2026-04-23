@@ -23,6 +23,15 @@ from .serializers import (
 class PlanTaskViewSet(viewsets.ModelViewSet):
     """计划任务视图集"""
     queryset = PlanTask.objects.prefetch_related('successor_dependencies').all()
+    required_permissions = {
+        'list': ['plan.task.read'],
+        'retrieve': ['plan.task.read'],
+        'create': ['plan.task.write'],
+        'update': ['plan.task.write'],
+        'partial_update': ['plan.task.write'],
+        'destroy': ['plan.task.write'],
+        'batch_update': ['plan.task.batch_update'],
+    }
     filterset_fields = [
         'project', 'phase', 'task_status', 'task_level', 
         'is_hour_task', 'parent_task', 'version'
@@ -112,6 +121,14 @@ class PlanTaskCategoryViewSet(viewsets.ModelViewSet):
     """计划任务类别字典视图集"""
     queryset = PlanTaskCategory.objects.all()
     serializer_class = PlanTaskCategorySerializer
+    required_permissions = {
+        'list': ['master_data.department.read'],
+        'retrieve': ['master_data.department.read'],
+        'create': ['master_data.department.write'],
+        'update': ['master_data.department.write'],
+        'partial_update': ['master_data.department.write'],
+        'destroy': ['master_data.department.write'],
+    }
     filterset_fields = ['category_type', 'enabled']
     search_fields = ['category_value']
     ordering_fields = ['category_type', 'sort_order', 'category_value', 'created_at']
@@ -122,6 +139,14 @@ class ResourcePlanViewSet(viewsets.ModelViewSet):
     """资源计划视图集"""
     queryset = ResourcePlan.objects.all()
     serializer_class = ResourcePlanSerializer
+    required_permissions = {
+        'list': ['plan.task.read'],
+        'retrieve': ['plan.task.read'],
+        'create': ['plan.task.write'],
+        'update': ['plan.task.write'],
+        'partial_update': ['plan.task.write'],
+        'destroy': ['plan.task.write'],
+    }
     filterset_fields = [
         'project', 'task', 'resource_type', 'resource_code', 'status'
     ]
@@ -134,6 +159,14 @@ class ResourceReserveViewSet(viewsets.ModelViewSet):
     """资源预占视图集"""
     queryset = ResourceReserve.objects.all()
     serializer_class = ResourceReserveSerializer
+    required_permissions = {
+        'list': ['plan.task.read'],
+        'retrieve': ['plan.task.read'],
+        'create': ['plan.task.write'],
+        'update': ['plan.task.write'],
+        'partial_update': ['plan.task.write'],
+        'destroy': ['plan.task.write'],
+    }
     filterset_fields = [
         'project', 'resource_type', 'resource_code', 
         'reserve_status', 'project_short_code'
@@ -147,6 +180,14 @@ class PlanVersionViewSet(viewsets.ModelViewSet):
     """计划版本视图集"""
     queryset = PlanVersion.objects.select_related('project').all()
     serializer_class = PlanVersionSerializer
+    required_permissions = {
+        'list': ['plan.version.read'],
+        'retrieve': ['plan.version.read'],
+        'create': ['plan.version.write'],
+        'update': ['plan.version.write'],
+        'partial_update': ['plan.version.write'],
+        'destroy': ['plan.version.write'],
+    }
     filterset_fields = ['project', 'status', 'is_current']
     search_fields = ['version_no', 'version_name']
     ordering_fields = ['version_no', 'publish_date', 'created_at']

@@ -75,6 +75,7 @@
                 :value="record.status"
                 size="small"
                 style="width: 100px"
+                :disabled="!canUpdateProjectStatus"
                 :loading="Boolean(statusUpdatingMap[record.project_id])"
                 @change="(value) => handleStatusChange(record, value)"
               >
@@ -98,6 +99,7 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { getExecutionList, partialUpdateProject } from '@/api/project'
+import { hasPermission } from '@/utils/permissions'
 
 const router = useRouter()
 
@@ -208,6 +210,7 @@ const getStatusText = (status) => {
 }
 
 const statusUpdatingMap = reactive({})
+const canUpdateProjectStatus = hasPermission('project.status.update')
 
 // 加载数据
 const fetchData = async () => {
@@ -255,6 +258,10 @@ const handleRowClick = (record) => {
 }
 
 const handleStatusChange = async (record, nextStatus) => {
+  if (!canUpdateProjectStatus) {
+    message.warning('您暂无项目状态修改权限')
+    return
+  }
   if (!record || !record.project_id) return
   const previousStatus = record.status
   if (previousStatus === nextStatus) return

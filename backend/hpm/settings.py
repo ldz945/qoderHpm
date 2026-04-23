@@ -148,6 +148,9 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'hpm.permissions.HpmActionPermission',
+    ],
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
         'rest_framework.renderers.BrowsableAPIRenderer',
@@ -155,6 +158,9 @@ REST_FRAMEWORK = {
     'DATETIME_FORMAT': '%Y-%m-%d %H:%M:%S',
     'DATE_FORMAT': '%Y-%m-%d',
 }
+
+# 权限拦截开关：默认关闭，逐步上线时再开启。
+HPM_PERMISSION_ENFORCEMENT = False
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True  # 开发环境
