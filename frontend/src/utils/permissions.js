@@ -9,10 +9,12 @@ const rolePermissions = {
     'menu.master_data.resources.view', 'menu.master_data.prices.view'
   ],
   PMO: [
-    'project.read', 'project.create', 'project.update', 'project.status.update',
+    'project.read', 'project.create', 'project.update', 'project.status.update', 'project.pm.update',
     'plan.task.read', 'plan.task.write', 'plan.task.batch_update',
     'plan.version.read', 'plan.version.write',
     'execution.read', 'execution.detail.read', 'execution.actual_hours.read',
+    'master_data.department.read', 'master_data.employee.read',
+    'master_data.resource.read', 'master_data.price.read',
     'menu.project.list.view', 'menu.plan.list.view', 'menu.execution.view'
   ],
   PROJECT_MANAGER: [
@@ -20,6 +22,8 @@ const rolePermissions = {
     'plan.task.read', 'plan.task.write', 'plan.task.batch_update',
     'plan.version.read', 'plan.version.write',
     'execution.read', 'execution.detail.read',
+    'master_data.department.read', 'master_data.employee.read',
+    'master_data.resource.read', 'master_data.price.read',
     'menu.project.list.view', 'menu.plan.list.view', 'menu.execution.view'
   ],
   PLAN_ENGINEER: [
@@ -39,18 +43,37 @@ const rolePermissions = {
   ]
 }
 
+export const getCurrentRoles = () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('hpm_user') || '{}')
+    if (user.roles && Array.isArray(user.roles)) return user.roles
+  } catch {}
+  const legacy = window.localStorage.getItem('hpm_role')
+  return legacy ? [legacy] : ['SUPER_ADMIN']
+}
+
 export const getCurrentRole = () => {
-  return window.localStorage.getItem('hpm_role') || 'SUPER_ADMIN'
+  return getCurrentRoles()[0] || 'SUPER_ADMIN'
 }
 
 export const hasPermission = (permissionCode) => {
-  const role = getCurrentRole()
-  const perms = rolePermissions[role] || []
-  return perms.includes('*') || perms.includes(permissionCode)
+  const roles = getCurrentRoles()
+  for (const role of roles) {
+    const perms = rolePermissions[role] || []
+    if (perms.includes('*') || perms.includes(permissionCode)) return true
+  }
+  return false
 }
+
+export const hasAnyPermission = (codes = []) => codes.some(c => hasPermission(c))
 
 export const getRolePermissions = () => {
-  const role = getCurrentRole()
-  return rolePermissions[role] || []
+  const roles = getCurrentRoles()
+  const merged = new Set()
+  for (const role of roles) {
+    for (const p of (rolePermissions[role] || [])) {
+      merged.add(p)
+    }
+  }
+  return [...merged]
 }
-

@@ -40,3 +40,7 @@ export const getPlanVersion = (id) => request.get(`/plans/plan-versions/${id}/`)
 export const createPlanVersion = (data) => request.post('/plans/plan-versions/', data)
 export const updatePlanVersion = (id, data) => request.put(`/plans/plan-versions/${id}/`, data)
 export const deletePlanVersion = (id) => request.delete(`/plans/plan-versions/${id}/`)
+
+// ===== 计划/基线变更记录 =====
+export const getPlanChangeLogs = (params) => request.get('/plans/change-logs/', { params })
+

@@ -1,0 +1,3 @@
+cd C:\Users\ty073\Documents\myCode\QoderHpm\frontend; npm run dev
+
+cd C:\Users\ty073\Documents\myCode\QoderHpm\backend; python manage.py runserver

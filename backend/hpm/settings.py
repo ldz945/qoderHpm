@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -148,6 +149,10 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [
         'hpm.permissions.HpmActionPermission',
     ],
@@ -159,8 +164,13 @@ REST_FRAMEWORK = {
     'DATE_FORMAT': '%Y-%m-%d',
 }
 
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=12),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+}
+
 # 权限拦截开关：默认关闭，逐步上线时再开启。
-HPM_PERMISSION_ENFORCEMENT = False
+HPM_PERMISSION_ENFORCEMENT = True
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True  # 开发环境

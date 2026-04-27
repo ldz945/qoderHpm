@@ -11,5 +11,6 @@ router.register('task-categories', views.PlanTaskCategoryViewSet)
 router.register('resource-plans', views.ResourcePlanViewSet)
 router.register('resource-reserves', views.ResourceReserveViewSet)
 router.register('plan-versions', views.PlanVersionViewSet)
+router.register('change-logs', views.PlanChangeLogViewSet)
 
 urlpatterns = router.urls

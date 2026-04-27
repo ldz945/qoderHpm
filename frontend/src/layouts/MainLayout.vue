@@ -59,6 +59,7 @@
           <template #title>计划管理</template>
           <a-menu-item key="plan-list">项目计划</a-menu-item>
           <a-menu-item key="plan-reserve">资源预占</a-menu-item>
+          <a-menu-item key="plan-change-logs">变更记录</a-menu-item>
         </a-sub-menu>
 
         <!-- 项目执行 -->
@@ -101,6 +102,16 @@
           <a-menu-item key="expense-list">杂项费用</a-menu-item>
           <a-menu-item key="scope-list">项目范围</a-menu-item>
         </a-sub-menu>
+
+        <!-- 系统管理 -->
+        <a-sub-menu key="system" v-if="isSuperAdmin">
+          <template #icon>
+            <SettingOutlined />
+          </template>
+          <template #title>系统管理</template>
+          <a-menu-item key="system-users">用户管理</a-menu-item>
+          <a-menu-item key="system-permissions">权限说明</a-menu-item>
+        </a-sub-menu>
       </a-menu>
     </a-layout-sider>
 
@@ -115,7 +126,9 @@
           </a-breadcrumb>
           <div class="user-info">
             <a-avatar icon="<UserOutlined />" />
-            <span class="username">管理员</span>
+            <span class="username">{{ currentUser.name || '用户' }}</span>
+            <a-tag color="blue">{{ roleLabel }}</a-tag>
+            <a-button type="link" danger size="small" @click="handleLogout">退出</a-button>
           </div>
         </div>
       </a-layout-header>
@@ -136,7 +149,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   DashboardOutlined,
@@ -148,10 +161,35 @@ import {
   CheckCircleOutlined,
   ToolOutlined,
   UserOutlined,
+  SettingOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
+
+const ROLE_LABELS = {
+  SUPER_ADMIN: '超级管理员', MD_ADMIN: '主数据管理员', PMO: 'PMO',
+  PROJECT_MANAGER: '项目经理', PLAN_ENGINEER: '计划工程师', EXECUTOR: '执行人', AUDITOR: '审计/只读',
+}
+
+const currentUser = computed(() => {
+  try { return JSON.parse(localStorage.getItem('hpm_user') || '{}') } catch { return {} }
+})
+const currentRoles = computed(() => {
+  const u = currentUser.value
+  if (u.roles && Array.isArray(u.roles)) return u.roles
+  return ['SUPER_ADMIN']
+})
+const roleLabel = computed(() => currentRoles.value.map(r => ROLE_LABELS[r] || r).join(' / '))
+const isSuperAdmin = computed(() => currentRoles.value.includes('SUPER_ADMIN'))
+
+const handleLogout = () => {
+  localStorage.removeItem('hpm_token')
+  localStorage.removeItem('hpm_refresh_token')
+  localStorage.removeItem('hpm_user')
+  localStorage.removeItem('hpm_role')
+  router.push('/login')
+}
 
 // 侧边栏折叠状态
 const collapsed = ref(false)
@@ -173,6 +211,7 @@ const selectedKeys = computed(() => {
     '/plan/list': 'plan-list',
     '/plan/edit': 'plan-list',
     '/plan/reserve': 'plan-reserve',
+    '/plan/change-logs': 'plan-change-logs',
     '/execution/list': 'execution',
     '/execution/detail': 'execution',
     '/change/list': 'change',
@@ -195,6 +234,8 @@ const selectedKeys = computed(() => {
     '/expense/form': 'expense-list',
     '/scope/list': 'scope-list',
     '/scope/form': 'scope-list',
+    '/system/users': 'system-users',
+    '/system/permissions': 'system-permissions',
   }
   
   // 精确匹配
@@ -232,6 +273,8 @@ watch(() => route.path, (path) => {
     path.startsWith('/scope')
   ) {
     openKeys.value = ['auxiliary']
+  } else if (path.startsWith('/system')) {
+    openKeys.value = ['system']
   }
 }, { immediate: true })
 
@@ -246,6 +289,7 @@ const handleMenuClick = ({ key }) => {
     'project-list': '/project/list',
     'plan-list': '/plan/list',
     'plan-reserve': '/plan/reserve',
+    'plan-change-logs': '/plan/change-logs',
     'execution': '/execution/list',
     'change': '/change/list',
     'acceptance': '/acceptance/list',
@@ -258,6 +302,8 @@ const handleMenuClick = ({ key }) => {
     'action-item-list': '/action-item/list',
     'expense-list': '/expense/list',
     'scope-list': '/scope/list',
+    'system-users': '/system/users',
+    'system-permissions': '/system/permissions',
   }
   
   const targetPath = routeMap[key]

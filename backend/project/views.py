@@ -19,8 +19,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
     """项目视图集"""
     queryset = Project.objects.prefetch_related('plan_tasks').all()
     required_permissions = {
-        'list': ['project.read'],
-        'retrieve': ['project.read'],
+        'list': ['project.read', 'execution.read'],
+        'retrieve': ['project.read', 'execution.read'],
         'create': ['project.create'],
         'update': ['project.update'],
         'partial_update': ['project.update'],
@@ -33,13 +33,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
     search_fields = ['project_code', 'project_name', 'pm', 'customer_name']
     ordering_fields = ['project_code', 'created_at', 'contract_amount']
     ordering = ['-created_at']
-    
-    def get_required_permissions(self, request):
-        action = getattr(self, 'action', None)
-        base = self.required_permissions.get(action) or self.required_permissions.get('*') or []
-        if action == 'partial_update' and 'status' in (request.data or {}):
-            return ['project.status.update']
-        return base
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -59,7 +52,25 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if project_name:
             queryset = queryset.filter(project_name__icontains=project_name)
 
+        # 数据范围隔离：项目经理只能看到自己负责的项目
+        from hpm.permissions import get_visible_project_ids
+        visible = get_visible_project_ids(self.request.user)
+        if visible is not None:
+            queryset = queryset.filter(project_id__in=visible)
+
         return queryset
+
+    def get_required_permissions(self, request):
+        action = getattr(self, 'action', None)
+        base = self.required_permissions.get(action) or self.required_permissions.get('*') or []
+        if action == 'partial_update':
+            data = request.data or {}
+            if 'status' in data:
+                return ['project.status.update']
+            if 'pm' in data:
+                # 修改项目经理需要更高权限（PMO 或超管），项目经理本身无此权限
+                return ['project.pm.update']
+        return base
 
 
 class ProjectTaskViewSet(viewsets.ModelViewSet):
@@ -79,6 +90,14 @@ class ProjectTaskViewSet(viewsets.ModelViewSet):
     ordering_fields = ['task_code', 'created_at']
     ordering = ['task_code']
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        from hpm.permissions import get_visible_project_ids
+        visible = get_visible_project_ids(self.request.user)
+        if visible is not None:
+            queryset = queryset.filter(project_id__in=visible)
+        return queryset
+
 
 class ProjectMemberViewSet(viewsets.ModelViewSet):
     """项目成员视图集"""
@@ -96,6 +115,14 @@ class ProjectMemberViewSet(viewsets.ModelViewSet):
     search_fields = ['employee_code', 'department']
     ordering_fields = ['employee_code', 'created_at']
     ordering = ['employee_code']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        from hpm.permissions import get_visible_project_ids
+        visible = get_visible_project_ids(self.request.user)
+        if visible is not None:
+            queryset = queryset.filter(project_id__in=visible)
+        return queryset
 
 
 class ActualHourViewSet(mixins.ListModelMixin, 

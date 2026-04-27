@@ -424,6 +424,24 @@
       </a-table>
     </a-modal>
 
+    <!-- 变更原因填写弹窗（保存计划/基线时强制） -->
+    <a-modal
+      v-model:open="reasonModalVisible"
+      :title="reasonModalTitle"
+      ok-text="确定"
+      cancel-text="取消"
+      @ok="handleReasonOk"
+      @cancel="handleReasonCancel"
+    >
+      <a-textarea
+        v-model:value="reasonText"
+        :rows="4"
+        placeholder="请填写本次变更的原因（必填）"
+        :maxlength="500"
+        show-count
+      />
+    </a-modal>
+
   </div>
 </template>
 
@@ -460,6 +478,33 @@ const ganttRef = ref(null)
 const baselineModalVisible = ref(false)
 const baselineSaving = ref(false)
 const baselineRows = ref([])
+
+// 变更原因弹窗（保存计划/基线时强制填写）
+const reasonModalVisible = ref(false)
+const reasonModalTitle = ref('请填写变更原因')
+const reasonText = ref('')
+let reasonResolver = null
+const promptChangeReason = (title = '请填写变更原因') => {
+  reasonModalTitle.value = title
+  reasonText.value = ''
+  reasonModalVisible.value = true
+  return new Promise(resolve => { reasonResolver = resolve })
+}
+const handleReasonOk = () => {
+  const text = (reasonText.value || '').trim()
+  if (!text) {
+    message.warning('变更原因为必填项')
+    return
+  }
+  reasonModalVisible.value = false
+  if (reasonResolver) reasonResolver(text)
+  reasonResolver = null
+}
+const handleReasonCancel = () => {
+  reasonModalVisible.value = false
+  if (reasonResolver) reasonResolver(null)
+  reasonResolver = null
+}
 
 const projectInfo = ref({
   code: '',
@@ -955,7 +1000,7 @@ const collectChangedBaselineTasks = () => {
     }))
 }
 
-const persistTaskUpdates = async (tasks, fields) => {
+const persistTaskUpdates = async (tasks, fields, opts = {}) => {
   const normalizedTasks = (tasks || []).map(task => ({
     ...task,
     plan_task_id: task.plan_task_id || task.id
@@ -963,7 +1008,10 @@ const persistTaskUpdates = async (tasks, fields) => {
 
   if (normalizedTasks.length === 0) return
 
-  const batchRes = await batchUpdatePlanTasks({ tasks: normalizedTasks })
+  const payload = { tasks: normalizedTasks }
+  if (opts.changeReason) payload.change_reason = opts.changeReason
+  if (opts.changeType) payload.change_type = opts.changeType
+  const batchRes = await batchUpdatePlanTasks(payload)
   const batchData = batchRes?.data && typeof batchRes.data === 'object' ? batchRes.data : batchRes
   const updated = Array.isArray(batchData?.updated) ? batchData.updated : []
   const errors = Array.isArray(batchData?.errors) ? batchData.errors : []
@@ -1005,7 +1053,15 @@ const handleSaveBaselines = async () => {
 
   baselineSaving.value = true
   try {
-    await persistTaskUpdates(changedTasks, ['baseline_start_date', 'baseline_end_date'])
+    const reason = await promptChangeReason('请填写基线变更原因')
+    if (!reason) {
+      baselineSaving.value = false
+      return
+    }
+    await persistTaskUpdates(changedTasks, ['baseline_start_date', 'baseline_end_date'], {
+      changeReason: reason,
+      changeType: 'BASELINE'
+    })
     await fetchTasks()
     baselineModalVisible.value = false
     message.success(`已保存 ${changedTasks.length} 条任务基线`)
@@ -1248,17 +1304,25 @@ const handleTbqImport = () => {
 // 甘特图保存
 const handleGanttSave = async (tasks) => {
   try {
+    const reason = await promptChangeReason('请填写计划变更原因')
+    if (!reason) {
+      throw new Error('USER_CANCELLED')
+    }
     await persistTaskUpdates(tasks, [
       'planned_start_date', 'planned_end_date', 'workload_days',
       'sort_order', 'parent_task_id', 'phase', 'progress_percent',
       'task_name', 'pre_task_code', 'logic_relation', 'dependencies', 'task_level',
       'baseline_start_date', 'baseline_end_date'
-    ])
+    ], { changeReason: reason, changeType: 'PLAN' })
 
     await fetchTasks() // 重新加载数据
     message.success('甘特图修改已同步到数据库')
   } catch (error) {
-    message.error('同步失败，请重试')
+    if (error?.message === 'USER_CANCELLED') {
+      message.info('已取消保存')
+    } else {
+      message.error('同步失败，请重试')
+    }
     throw error // 让 GanttChart 知道保存失败
   }
 }

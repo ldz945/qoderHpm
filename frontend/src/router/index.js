@@ -3,6 +3,12 @@ import MainLayout from '@/layouts/MainLayout.vue'
 
 const routes = [
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/Login.vue'),
+    meta: { public: true },
+  },
+  {
     path: '/',
     component: MainLayout,
     redirect: '/dashboard',
@@ -13,6 +19,9 @@ const routes = [
       { path: 'master-data/departments', name: 'DepartmentList', component: () => import('@/views/masterData/DepartmentList.vue'), meta: { title: '部门维护' } },
       { path: 'master-data/resources', name: 'ResourceList', component: () => import('@/views/masterData/ResourceList.vue'), meta: { title: '资源管理' } },
       { path: 'master-data/prices', name: 'PriceList', component: () => import('@/views/masterData/PriceList.vue'), meta: { title: '价格管理' } },
+      // 系统管理
+      { path: 'system/users', name: 'UserList', component: () => import('@/views/system/UserList.vue'), meta: { title: '用户管理' } },
+      { path: 'system/permissions', name: 'RolePermissions', component: () => import('@/views/system/RolePermissions.vue'), meta: { title: '权限说明' } },
       // 项目
       { path: 'project/list', name: 'ProjectList', component: () => import('@/views/project/ProjectList.vue'), meta: { title: '项目立项' } },
       { path: 'project/create', name: 'ProjectCreate', component: () => import('@/views/project/ProjectCreate.vue'), meta: { title: '新增项目' } },
@@ -24,6 +33,7 @@ const routes = [
       { path: 'plan/list', name: 'PlanList', component: () => import('@/views/plan/PlanList.vue'), meta: { title: '项目计划' } },
       { path: 'plan/edit/:id', name: 'PlanEdit', component: () => import('@/views/plan/PlanEdit.vue'), meta: { title: '计划编辑' } },
       { path: 'plan/reserve', name: 'ResourceReserve', component: () => import('@/views/plan/ResourceReserve.vue'), meta: { title: '资源预占' } },
+      { path: 'plan/change-logs', name: 'PlanChangeLogs', component: () => import('@/views/plan/PlanChangeLogs.vue'), meta: { title: '变更记录' } },
       // 执行
       { path: 'execution/list', name: 'ExecutionList', component: () => import('@/views/execution/ExecutionList.vue'), meta: { title: '项目执行' } },
       { path: 'execution/detail/:id', name: 'ExecutionDetail', component: () => import('@/views/execution/ExecutionDetail.vue'), meta: { title: '执行详情' } },
@@ -57,6 +67,16 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+// 路由守卫 - 未登录跳转登录页
+router.beforeEach((to, from, next) => {
+  const token = localStorage.getItem('hpm_token')
+  if (to.meta?.public || token) {
+    next()
+  } else {
+    next('/login')
+  }
 })
 
 export default router

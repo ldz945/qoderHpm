@@ -78,11 +78,56 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
     """项目成员序列化器"""
     employee_name = serializers.CharField(source='employee.employee_name', read_only=True)
     department = serializers.CharField(source='employee.department', read_only=True)
-    
+    role = serializers.CharField(source='project_role', required=False, default='')
+    is_core = serializers.BooleanField(required=False, default=False)
+    source = serializers.CharField(source='person_source', required=False, default='')
+    employee_id = serializers.IntegerField(write_only=True, required=False)
+    project_id = serializers.CharField(write_only=True, required=False)
+
     class Meta:
         model = ProjectMember
-        fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at']
+        fields = [
+            'member_id', 'project', 'project_id', 'employee', 'employee_id', 'employee_code',
+            'employee_name', 'department', 'role', 'is_core', 'source',
+            'resource_code', 'effective_from', 'effective_to',
+            'is_core_member', 'project_role', 'person_source',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'employee_code', 'employee_name', 'department']
+        extra_kwargs = {
+            'employee': {'required': False, 'read_only': True},
+            'project': {'required': False, 'read_only': True},
+            'is_core_member': {'required': False},
+            'project_role': {'required': False},
+            'person_source': {'required': False},
+        }
+
+    def create(self, validated_data):
+        employee_id = validated_data.pop('employee_id', None)
+        project_id = validated_data.pop('project_id', None)
+        is_core = validated_data.pop('is_core', False)
+        if project_id:
+            validated_data['project_id'] = project_id
+        if employee_id:
+            from master_data.models import Employee
+            emp = Employee.objects.get(pk=employee_id)
+            validated_data['employee'] = emp
+            validated_data['employee_code'] = emp.employee_code
+            validated_data['department'] = emp.department
+        validated_data['is_core_member'] = 'Y' if is_core else 'N'
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        is_core = validated_data.pop('is_core', None)
+        validated_data.pop('employee_id', None)
+        if is_core is not None:
+            validated_data['is_core_member'] = 'Y' if is_core else 'N'
+        return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['is_core'] = instance.is_core_member == 'Y'
+        return ret
 
 
 class ActualHourSerializer(serializers.ModelSerializer):

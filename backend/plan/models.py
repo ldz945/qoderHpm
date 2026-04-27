@@ -205,6 +205,41 @@ class PlanTaskCategory(models.Model):
         return f'{self.category_type}:{self.category_value}'
 
 
+class PlanChangeLog(models.Model):
+    """计划/基线变更记录"""
+
+    CHANGE_TYPE_CHOICES = [
+        ('PLAN', '计划变更'),
+        ('BASELINE', '基线变更'),
+    ]
+
+    log_id = models.AutoField(primary_key=True, verbose_name='记录ID')
+    project = models.ForeignKey(
+        'project.Project',
+        on_delete=models.CASCADE,
+        verbose_name='所属项目',
+        related_name='plan_change_logs',
+    )
+    change_type = models.CharField(
+        max_length=20, choices=CHANGE_TYPE_CHOICES, default='PLAN', verbose_name='变更类型'
+    )
+    change_reason = models.TextField(verbose_name='变更原因')
+    affected_count = models.IntegerField(default=0, verbose_name='影响任务数')
+    affected_task_ids = models.TextField(blank=True, verbose_name='受影响任务ID(逗号分隔)')
+    detail = models.TextField(blank=True, verbose_name='变更明细(JSON)')
+    operator = models.CharField(max_length=100, verbose_name='操作人')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='变更时间')
+
+    class Meta:
+        db_table = 'hpm_plan_change_log'
+        verbose_name = '计划变更记录'
+        verbose_name_plural = '计划变更记录'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.project_id} [{self.get_change_type_display()}] {self.created_at:%Y-%m-%d %H:%M}'
+
+
 class ResourcePlan(models.Model):
     """资源计划"""
 

@@ -79,6 +79,21 @@
         <template v-if="column.key === 'contract_amount'">
           {{ record.contract_amount ? `${record.currency} ${record.contract_amount}` : '-' }}
         </template>
+        <template v-if="column.key === 'pm'">
+          <a-select
+            :value="record.pm || undefined"
+            size="small"
+            style="width: 140px"
+            placeholder="选择"
+            show-search
+            allow-clear
+            :options="pmOptions"
+            :filter-option="filterPm"
+            :disabled="!canUpdatePm"
+            :loading="Boolean(pmUpdatingMap[record.project_id])"
+            @change="(value) => handlePmChange(record, value)"
+          />
+        </template>
         <template v-if="column.key === 'action'">
           <a-space>
             <a-button type="link" size="small" @click="handleView(record)">
@@ -97,6 +112,7 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { SearchOutlined, ReloadOutlined, PlusOutlined, EyeOutlined } from '@ant-design/icons-vue'
 import { getProjects, partialUpdateProject } from '@/api/project'
+import { getEmployees } from '@/api/masterData'
 import { hasPermission } from '@/utils/permissions'
 
 const router = useRouter()
@@ -155,9 +171,29 @@ const columns = [
 ]
 
 const statusUpdatingMap = reactive({})
+const pmUpdatingMap = reactive({})
+const pmOptions = ref([])
 
 const canCreateProject = hasPermission('project.create')
 const canUpdateProjectStatus = hasPermission('project.status.update')
+const canUpdateProject = hasPermission('project.update')
+const canUpdatePm = hasPermission('project.pm.update')
+
+const filterPm = (input, option) => {
+  const text = (option?.label || '').toLowerCase()
+  return text.includes((input || '').toLowerCase())
+}
+
+const fetchPmOptions = async () => {
+  try {
+    const res = await getEmployees({ page_size: 1000 })
+    const list = res.results || res.data?.list || []
+    pmOptions.value = list.map(e => ({
+      value: e.employee_name,
+      label: `${e.employee_name}${e.department ? ' - ' + e.department : ''}`
+    }))
+  } catch { pmOptions.value = [] }
+}
 
 const fetchData = async () => {
   loading.value = true
@@ -228,7 +264,32 @@ const handleStatusChange = async (record, nextStatus) => {
   }
 }
 
-onMounted(fetchData)
+const handlePmChange = async (record, nextPm) => {
+  if (!canUpdatePm) {
+    message.warning('您暂无项目经理修改权限')
+    return
+  }
+  if (!record || !record.project_id) return
+  const previous = record.pm
+  const value = nextPm || ''
+  if (previous === value) return
+  pmUpdatingMap[record.project_id] = true
+  record.pm = value
+  try {
+    await partialUpdateProject(record.project_id, { pm: value })
+    message.success('项目经理已更新')
+  } catch {
+    record.pm = previous
+    message.error('修改失败')
+  } finally {
+    pmUpdatingMap[record.project_id] = false
+  }
+}
+
+onMounted(() => {
+  fetchData()
+  fetchPmOptions()
+})
 </script>
 
 <style scoped>

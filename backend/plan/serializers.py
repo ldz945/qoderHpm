@@ -4,7 +4,7 @@
 """
 
 from rest_framework import serializers
-from .models import PlanTask, PlanTaskDependency, PlanTaskCategory, ResourcePlan, ResourceReserve, PlanVersion
+from .models import PlanTask, PlanTaskDependency, PlanTaskCategory, ResourcePlan, ResourceReserve, PlanVersion, PlanChangeLog
 
 
 def _build_legacy_dependency_fields(task):
@@ -264,3 +264,21 @@ class PlanVersionSerializer(serializers.ModelSerializer):
             'project_code', 'project_name', 'project_manager'
         ]
         read_only_fields = ['created_at', 'updated_at']
+
+
+class PlanChangeLogSerializer(serializers.ModelSerializer):
+    """计划变更记录序列化器"""
+    project_code = serializers.CharField(source='project.project_code', read_only=True)
+    project_name = serializers.CharField(source='project.project_name', read_only=True)
+    change_type_display = serializers.CharField(source='get_change_type_display', read_only=True)
+
+    class Meta:
+        model = PlanChangeLog
+        fields = [
+            'log_id', 'project', 'project_code', 'project_name',
+            'change_type', 'change_type_display', 'change_reason',
+            'affected_count', 'affected_task_ids', 'detail',
+            'operator', 'created_at',
+        ]
+        read_only_fields = ['log_id', 'created_at', 'project_code', 'project_name', 'change_type_display']
+
